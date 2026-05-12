@@ -228,32 +228,32 @@ enum ImagePipeline {
 // MARK: - Wallpaper setter
 
 enum WallpaperSetter {
+    // SPAN_WALLPAPER_DIR overrides; default is ~/Library/Application Support/SpanWallpaper (symlinkable)
     static let supportDir: URL = {
         let fm = FileManager.default
-        let base = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let dir = base.appendingPathComponent("SpanWallpaper", isDirectory: true)
+        let dir: URL
+        if let custom = ProcessInfo.processInfo.environment["SPAN_WALLPAPER_DIR"] {
+            dir = URL(fileURLWithPath: (custom as NSString).expandingTildeInPath, isDirectory: true)
+        } else {
+            let base = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+            dir = base.appendingPathComponent("SpanWallpaper", isDirectory: true)
+        }
         try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
     }()
 
-    static func cleanCache() {
-        let fm = FileManager.default
-        guard let items = try? fm.contentsOfDirectory(at: supportDir, includingPropertiesForKeys: nil) else { return }
-        for url in items where url.lastPathComponent.hasPrefix("slice-") && url.pathExtension == "png" {
-            try? fm.removeItem(at: url)
-        }
-    }
-
     static func apply(slices: [ScreenSlice], renderedImages: [CGImage]) throws {
         precondition(slices.count == renderedImages.count, "slice/image count mismatch")
-        cleanCache()
 
-        let runID = UUID().uuidString.prefix(8)
+        let fm = FileManager.default
         let options: [NSWorkspace.DesktopImageOptionKey: Any] = [
             .imageScaling: NSNumber(value: NSImageScaling.scaleAxesIndependently.rawValue),
             .allowClipping: NSNumber(value: true)
         ]
 
+        // Write new slices with a fresh run ID
+        let runID = UUID().uuidString.prefix(8)
+        var written: [URL] = []
         for (slice, image) in zip(slices, renderedImages) {
             let url = supportDir.appendingPathComponent(
                 "slice-\(slice.index)-\(runID).png", isDirectory: false
@@ -263,6 +263,15 @@ enum WallpaperSetter {
                 try NSWorkspace.shared.setDesktopImageURL(url, for: slice.screen, options: options)
             } catch {
                 throw WallpaperError.setWallpaperFailed(screenIndex: slice.index, underlying: error)
+            }
+            written.append(url)
+        }
+
+        // Remove everything in supportDir except the slices we just wrote
+        let keep = Set(written.map { $0.lastPathComponent })
+        if let items = try? fm.contentsOfDirectory(at: supportDir, includingPropertiesForKeys: nil) {
+            for url in items where !keep.contains(url.lastPathComponent) {
+                try? fm.removeItem(at: url)
             }
         }
     }
