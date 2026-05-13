@@ -6,10 +6,8 @@
 //  across every attached display treated as one unified pixel canvas, then
 //  sliced at the real pixel seams and applied per-screen.
 //
-//  Usage:
-//      Drop an image onto the app icon, Dock icon, or window.
-//      CLI:  open /Applications/SpanWallpaper.app --args /path/to/image.png
-//      Direct: .../SpanWallpaper.app/Contents/MacOS/SpanWallpaper /path/to/image
+//  Drop an image for one-shot, or drop a folder to rotate on a schedule.
+//  Right-click the Dock icon for "Next Wallpaper" / "Stop Rotation".
 //
 
 import AppKit
@@ -40,6 +38,7 @@ enum WallpaperError: Error, CustomStringConvertible {
     case sliceRenderFailed(screenIndex: Int)
     case writeFailed(URL, underlying: Error)
     case setWallpaperFailed(screenIndex: Int, underlying: Error)
+    case noImagesInFolder(URL)
 
     var description: String {
         switch self {
@@ -53,6 +52,8 @@ enum WallpaperError: Error, CustomStringConvertible {
             return "Failed to write \(url.path): \(err.localizedDescription)"
         case .setWallpaperFailed(let i, let err):
             return "Failed to set wallpaper on screen index \(i): \(err.localizedDescription)"
+        case .noImagesInFolder(let url):
+            return "No image files found in \(url.path)."
         }
     }
 }
@@ -242,6 +243,8 @@ enum WallpaperSetter {
         return dir
     }()
 
+    static let configURL: URL = supportDir.appendingPathComponent("rotation.json")
+
     static func apply(slices: [ScreenSlice], renderedImages: [CGImage]) throws {
         precondition(slices.count == renderedImages.count, "slice/image count mismatch")
 
@@ -251,7 +254,6 @@ enum WallpaperSetter {
             .allowClipping: NSNumber(value: true)
         ]
 
-        // Write new slices with a fresh run ID
         let runID = UUID().uuidString.prefix(8)
         var written: [URL] = []
         for (slice, image) in zip(slices, renderedImages) {
@@ -267,13 +269,205 @@ enum WallpaperSetter {
             written.append(url)
         }
 
-        // Remove everything in supportDir except the slices we just wrote
-        let keep = Set(written.map { $0.lastPathComponent })
+        // Remove old slices only (preserve rotation.json)
+        let keep = Set(written.map { $0.lastPathComponent } + ["rotation.json"])
         if let items = try? fm.contentsOfDirectory(at: supportDir, includingPropertiesForKeys: nil) {
             for url in items where !keep.contains(url.lastPathComponent) {
                 try? fm.removeItem(at: url)
             }
         }
+    }
+}
+
+// MARK: - Folder scanning
+
+let imageExtensions: Set<String> = ["jpg", "jpeg", "png", "heic", "heif", "tiff", "tif", "bmp", "webp"]
+
+func imageFiles(in folderURL: URL) -> [URL] {
+    let fm = FileManager.default
+    guard let enumerator = fm.enumerator(
+        at: folderURL,
+        includingPropertiesForKeys: [.isRegularFileKey],
+        options: [.skipsHiddenFiles, .skipsSubdirectoryDescendants]
+    ) else { return [] }
+
+    var images: [URL] = []
+    for case let url as URL in enumerator {
+        if imageExtensions.contains(url.pathExtension.lowercased()) {
+            images.append(url)
+        }
+    }
+    return images.sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
+}
+
+// MARK: - Rotation config
+
+struct RotationConfig: Codable {
+    var folderPath: String
+    var intervalSeconds: Int
+    var lastImagePath: String?
+
+    static let defaultInterval = 86400
+
+    static func load() -> RotationConfig? {
+        guard let data = try? Data(contentsOf: WallpaperSetter.configURL) else { return nil }
+        return try? JSONDecoder().decode(RotationConfig.self, from: data)
+    }
+
+    func save() {
+        guard let data = try? JSONEncoder().encode(self) else { return }
+        try? data.write(to: WallpaperSetter.configURL)
+    }
+
+    static func remove() {
+        try? FileManager.default.removeItem(at: WallpaperSetter.configURL)
+    }
+}
+
+// MARK: - Rotation manager
+
+class RotationManager {
+    static let shared = RotationManager()
+
+    private var timer: Timer?
+    private(set) var config: RotationConfig?
+
+    var isActive: Bool { config != nil }
+
+    var folderName: String? {
+        guard let path = config?.folderPath else { return nil }
+        return (path as NSString).lastPathComponent
+    }
+
+    func start(folderPath: String, intervalSeconds: Int = RotationConfig.defaultInterval) {
+        config = RotationConfig(folderPath: folderPath, intervalSeconds: intervalSeconds)
+        config?.save()
+        installLaunchAgent()
+        applyNext()
+        scheduleTimer()
+        Log.info("Rotation started: \(folderPath), interval \(intervalSeconds)s")
+    }
+
+    func stop() {
+        timer?.invalidate()
+        timer = nil
+        config = nil
+        RotationConfig.remove()
+        uninstallLaunchAgent()
+        Log.info("Rotation stopped.")
+    }
+
+    func applyNext() {
+        guard let config = config else { return }
+        let folder = URL(fileURLWithPath: config.folderPath)
+        let images = imageFiles(in: folder)
+        guard !images.isEmpty else {
+            Log.info("No images in \(config.folderPath)")
+            return
+        }
+
+        let next = pickNext(from: images, lastUsed: config.lastImagePath)
+        do {
+            try processImage(at: next.path)
+            self.config?.lastImagePath = next.path
+            self.config?.save()
+        } catch {
+            Log.info("Rotation error: \(error)")
+        }
+    }
+
+    func resume() {
+        guard let saved = RotationConfig.load() else { return }
+        let folder = URL(fileURLWithPath: saved.folderPath)
+        guard FileManager.default.fileExists(atPath: folder.path) else {
+            RotationConfig.remove()
+            return
+        }
+        config = saved
+        scheduleTimer()
+        Log.info("Resumed rotation: \(saved.folderPath)")
+    }
+
+    private func pickNext(from images: [URL], lastUsed: String?) -> URL {
+        guard let last = lastUsed,
+              let idx = images.firstIndex(where: { $0.path == last }) else {
+            return images.randomElement()!
+        }
+        let nextIdx = (idx + 1) % images.count
+        return images[nextIdx]
+    }
+
+    private func scheduleTimer() {
+        timer?.invalidate()
+        guard let config = config else { return }
+        timer = Timer.scheduledTimer(withTimeInterval: TimeInterval(config.intervalSeconds), repeats: true) { [weak self] _ in
+            self?.applyNext()
+        }
+    }
+
+    // MARK: - LaunchAgent
+
+    private var launchAgentURL: URL {
+        let lib = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/LaunchAgents", isDirectory: true)
+        try? FileManager.default.createDirectory(at: lib, withIntermediateDirectories: true)
+        return lib.appendingPathComponent("com.shartman.SpanWallpaper.plist")
+    }
+
+    private var appBinaryPath: String {
+        Bundle.main.executablePath ?? "/Applications/SpanWallpaper.app/Contents/MacOS/SpanWallpaper"
+    }
+
+    private func installLaunchAgent() {
+        guard let config = config else { return }
+        let plist = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+          "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0">
+        <dict>
+            <key>Label</key>
+            <string>com.shartman.SpanWallpaper</string>
+            <key>ProgramArguments</key>
+            <array>
+                <string>\(appBinaryPath)</string>
+                <string>--rotate</string>
+            </array>
+            <key>StartInterval</key>
+            <integer>\(config.intervalSeconds)</integer>
+            <key>RunAtLoad</key>
+            <true/>
+            <key>StandardErrorPath</key>
+            <string>/tmp/SpanWallpaper.log</string>
+        </dict>
+        </plist>
+        """
+        // Unload first if already loaded
+        let label = "com.shartman.SpanWallpaper"
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+        proc.arguments = ["bootout", "gui/\(getuid())", launchAgentURL.path]
+        try? proc.run()
+        proc.waitUntilExit()
+
+        try? plist.write(to: launchAgentURL, atomically: true, encoding: .utf8)
+
+        let load = Process()
+        load.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+        load.arguments = ["bootstrap", "gui/\(getuid())", launchAgentURL.path]
+        try? load.run()
+        load.waitUntilExit()
+        Log.info("LaunchAgent installed: \(label)")
+    }
+
+    private func uninstallLaunchAgent() {
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+        proc.arguments = ["bootout", "gui/\(getuid())", launchAgentURL.path]
+        try? proc.run()
+        proc.waitUntilExit()
+        try? FileManager.default.removeItem(at: launchAgentURL)
+        Log.info("LaunchAgent removed.")
     }
 }
 
@@ -287,17 +481,17 @@ func processImage(at path: String) throws {
     }
 
     let layout = try ScreenLayout.detect()
-    Log.info("Screens: \(layout.slices.count) — canvas \(Int(layout.canvasPixelSize.width))×\(Int(layout.canvasPixelSize.height))px")
+    Log.info("Screens: \(layout.slices.count) -- canvas \(Int(layout.canvasPixelSize.width))x\(Int(layout.canvasPixelSize.height))px")
     for s in layout.slices {
-        Log.info("  screen[\(s.index)] origin=(\(Int(s.pixelOrigin.x)),\(Int(s.pixelOrigin.y))) size=\(Int(s.pixelSize.width))×\(Int(s.pixelSize.height))px @\(s.screen.backingScaleFactor)x")
+        Log.info("  screen[\(s.index)] origin=(\(Int(s.pixelOrigin.x)),\(Int(s.pixelOrigin.y))) size=\(Int(s.pixelSize.width))x\(Int(s.pixelSize.height))px @\(s.screen.backingScaleFactor)x")
     }
 
     let source = try ImagePipeline.loadCGImage(from: inputURL)
     let sourceSize = CGSize(width: source.width, height: source.height)
-    Log.info("Source: \(Int(sourceSize.width))×\(Int(sourceSize.height))px")
+    Log.info("Source: \(Int(sourceSize.width))x\(Int(sourceSize.height))px")
 
     let fillRect = ImagePipeline.sourceFillRect(sourceSize: sourceSize, canvas: layout.canvasPixelSize)
-    Log.info("Source crop rect: \(Int(fillRect.origin.x)),\(Int(fillRect.origin.y)) \(Int(fillRect.width))×\(Int(fillRect.height))")
+    Log.info("Source crop rect: \(Int(fillRect.origin.x)),\(Int(fillRect.origin.y)) \(Int(fillRect.width))x\(Int(fillRect.height))")
 
     let rendered: [CGImage] = try layout.slices.map { slice in
         try ImagePipeline.renderSlice(
@@ -352,37 +546,58 @@ class DropTargetView: NSView {
         strokeColor.setStroke()
         dash.stroke()
 
-        let text = "Drop image here"
-        let attrs: [NSAttributedString.Key: Any] = [
+        let mainText = "Drop image or folder"
+        let subText = RotationManager.shared.isActive
+            ? "Rotating: \(RotationManager.shared.folderName ?? "?")"
+            : "Folder = rotate daily"
+
+        let mainAttrs: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 20, weight: .medium),
             .foregroundColor: isDragHighlighted
                 ? NSColor(red: 0.4, green: 0.7, blue: 1.0, alpha: 1.0)
                 : NSColor(white: 0.5, alpha: 1)
         ]
-        let size = (text as NSString).size(withAttributes: attrs)
-        let origin = CGPoint(
-            x: bounds.midX - size.width / 2,
-            y: bounds.midY - size.height / 2
+        let subAttrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 13, weight: .regular),
+            .foregroundColor: RotationManager.shared.isActive
+                ? NSColor(red: 0.4, green: 0.8, blue: 0.5, alpha: 0.8)
+                : NSColor(white: 0.35, alpha: 1)
+        ]
+
+        let mainSize = (mainText as NSString).size(withAttributes: mainAttrs)
+        let subSize = (subText as NSString).size(withAttributes: subAttrs)
+        let gap: CGFloat = 6
+        let totalH = mainSize.height + gap + subSize.height
+        let topY = bounds.midY + totalH / 2 - mainSize.height
+
+        (mainText as NSString).draw(
+            at: CGPoint(x: bounds.midX - mainSize.width / 2, y: topY),
+            withAttributes: mainAttrs
         )
-        (text as NSString).draw(at: origin, withAttributes: attrs)
+        (subText as NSString).draw(
+            at: CGPoint(x: bounds.midX - subSize.width / 2, y: topY - gap - subSize.height),
+            withAttributes: subAttrs
+        )
     }
 
-    private func validImageURLs(from info: NSDraggingInfo) -> [URL] {
+    private func droppedFileURLs(from info: NSDraggingInfo) -> [URL] {
         guard let urls = info.draggingPasteboard.readObjects(
             forClasses: [NSURL.self],
-            options: [
-                .urlReadingFileURLsOnly: true,
-                .urlReadingContentsConformToTypes: [UTType.image.identifier]
-            ]
+            options: [.urlReadingFileURLsOnly: true]
         ) as? [URL] else { return [] }
         return urls
     }
 
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
-        let urls = validImageURLs(from: sender)
-        isDragHighlighted = !urls.isEmpty
+        let urls = droppedFileURLs(from: sender)
+        let valid = urls.contains { url in
+            var isDir: ObjCBool = false
+            FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir)
+            return isDir.boolValue || imageExtensions.contains(url.pathExtension.lowercased())
+        }
+        isDragHighlighted = valid
         needsDisplay = true
-        return urls.isEmpty ? [] : .copy
+        return valid ? .copy : []
     }
 
     override func draggingExited(_ sender: NSDraggingInfo?) {
@@ -394,8 +609,33 @@ class DropTargetView: NSView {
         isDragHighlighted = false
         needsDisplay = true
 
-        let urls = validImageURLs(from: sender)
+        let urls = droppedFileURLs(from: sender)
         guard let url = urls.first else { return false }
+
+        var isDir: ObjCBool = false
+        FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir)
+
+        if isDir.boolValue {
+            let images = imageFiles(in: url)
+            guard !images.isEmpty else {
+                showError("No image files found in \(url.lastPathComponent).")
+                return false
+            }
+
+            let interval: Int
+            if let envVal = ProcessInfo.processInfo.environment["SPAN_WALLPAPER_INTERVAL"],
+               let parsed = Int(envVal), parsed > 0 {
+                interval = parsed
+            } else {
+                interval = RotationConfig.defaultInterval
+            }
+
+            RotationManager.shared.start(folderPath: url.path, intervalSeconds: interval)
+            needsDisplay = true
+            return true
+        }
+
+        guard imageExtensions.contains(url.pathExtension.lowercased()) else { return false }
 
         DispatchQueue.global(qos: .userInitiated).async {
             do {
@@ -415,26 +655,55 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var hasProcessed = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        if hasProcessed {
-            NSApp.terminate(nil)
-            return
-        }
-
         let args = CommandLine.arguments
-        let filePaths = Array(args.dropFirst()).filter { !$0.hasPrefix("-") }
 
-        if !filePaths.isEmpty {
-            hasProcessed = true
-            for path in filePaths {
-                do {
-                    try processImage(at: path)
-                } catch {
-                    Log.info("ERROR: \(error)")
+        // launchd invokes with --rotate: apply next from saved config and exit
+        if args.contains("--rotate") {
+            if let config = RotationConfig.load() {
+                let folder = URL(fileURLWithPath: config.folderPath)
+                let images = imageFiles(in: folder)
+                if let next = pickNextImage(from: images, lastUsed: config.lastImagePath) {
+                    do {
+                        try processImage(at: next.path)
+                        var updated = config
+                        updated.lastImagePath = next.path
+                        updated.save()
+                    } catch {
+                        Log.info("ERROR: \(error)")
+                    }
                 }
             }
             NSApp.terminate(nil)
             return
         }
+
+        if hasProcessed {
+            NSApp.terminate(nil)
+            return
+        }
+
+        let filePaths = Array(args.dropFirst()).filter { !$0.hasPrefix("-") }
+
+        if !filePaths.isEmpty {
+            hasProcessed = true
+            for path in filePaths {
+                var isDir: ObjCBool = false
+                FileManager.default.fileExists(atPath: path, isDirectory: &isDir)
+                if isDir.boolValue {
+                    RotationManager.shared.start(folderPath: path)
+                } else {
+                    do { try processImage(at: path) }
+                    catch { Log.info("ERROR: \(error)") }
+                }
+            }
+            if !RotationManager.shared.isActive {
+                NSApp.terminate(nil)
+            }
+            return
+        }
+
+        // Resume rotation if config exists
+        RotationManager.shared.resume()
 
         showDropWindow()
     }
@@ -442,26 +711,69 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func application(_ sender: NSApplication, openFiles filenames: [String]) {
         hasProcessed = true
         for path in filenames {
-            do {
-                try processImage(at: path)
-            } catch {
-                if window != nil {
-                    showError(error.localizedDescription)
-                } else {
-                    Log.info("ERROR: \(error)")
+            var isDir: ObjCBool = false
+            FileManager.default.fileExists(atPath: path, isDirectory: &isDir)
+            if isDir.boolValue {
+                RotationManager.shared.start(folderPath: path)
+                if let w = window {
+                    w.contentView?.needsDisplay = true
+                }
+            } else {
+                do {
+                    try processImage(at: path)
+                } catch {
+                    if window != nil {
+                        showError(error.localizedDescription)
+                    } else {
+                        Log.info("ERROR: \(error)")
+                    }
                 }
             }
         }
         sender.reply(toOpenOrPrint: .success)
 
-        if window == nil {
+        if window == nil && !RotationManager.shared.isActive {
             DispatchQueue.main.async { NSApp.terminate(nil) }
         }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-        return true
+        return !RotationManager.shared.isActive
     }
+
+    // MARK: - Dock right-click menu
+
+    func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
+        guard RotationManager.shared.isActive else { return nil }
+        let menu = NSMenu()
+
+        let nextItem = NSMenuItem(title: "Next Wallpaper", action: #selector(dockNextWallpaper), keyEquivalent: "")
+        nextItem.target = self
+        menu.addItem(nextItem)
+
+        menu.addItem(NSMenuItem.separator())
+
+        let stopItem = NSMenuItem(title: "Stop Rotation", action: #selector(dockStopRotation), keyEquivalent: "")
+        stopItem.target = self
+        menu.addItem(stopItem)
+
+        return menu
+    }
+
+    @objc private func dockNextWallpaper() {
+        RotationManager.shared.applyNext()
+    }
+
+    @objc private func dockStopRotation() {
+        RotationManager.shared.stop()
+        if window == nil {
+            NSApp.terminate(nil)
+        } else {
+            window?.contentView?.needsDisplay = true
+        }
+    }
+
+    // MARK: - Window
 
     private func showDropWindow() {
         let w = NSWindow(
@@ -481,6 +793,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         NSApp.activate(ignoringOtherApps: true)
     }
+}
+
+// MARK: - Helpers
+
+func pickNextImage(from images: [URL], lastUsed: String?) -> URL? {
+    guard !images.isEmpty else { return nil }
+    guard let last = lastUsed,
+          let idx = images.firstIndex(where: { $0.path == last }) else {
+        return images.randomElement()
+    }
+    let nextIdx = (idx + 1) % images.count
+    return images[nextIdx]
 }
 
 // MARK: - Entry point
