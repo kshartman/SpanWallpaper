@@ -215,9 +215,13 @@ enum ImagePipeline {
         return out
     }
 
+    /// Writes PNG atomically: renders to a temp file, then renames into place.
     static func writePNG(_ image: CGImage, to url: URL) throws {
+        let tempURL = url.deletingLastPathComponent()
+            .appendingPathComponent(".\(UUID().uuidString).tmp", isDirectory: false)
+
         guard let dest = CGImageDestinationCreateWithURL(
-            url as CFURL,
+            tempURL as CFURL,
             UTType.png.identifier as CFString,
             1,
             nil
@@ -229,10 +233,21 @@ enum ImagePipeline {
         }
         CGImageDestinationAddImage(dest, image, nil)
         guard CGImageDestinationFinalize(dest) else {
+            try? FileManager.default.removeItem(at: tempURL)
             throw WallpaperError.writeFailed(url, underlying: NSError(
                 domain: "SpanWallpaper", code: 2,
                 userInfo: [NSLocalizedDescriptionKey: "CGImageDestination finalize failed"]
             ))
+        }
+
+        do {
+            if FileManager.default.fileExists(atPath: url.path) {
+                try FileManager.default.removeItem(at: url)
+            }
+            try FileManager.default.moveItem(at: tempURL, to: url)
+        } catch {
+            try? FileManager.default.removeItem(at: tempURL)
+            throw WallpaperError.writeFailed(url, underlying: error)
         }
     }
 }
@@ -302,7 +317,7 @@ enum WallpaperSetter {
             DispatchQueue.main.sync { applyBlock() }
         }
 
-        // Phase 3: Clean up old slices (preserve rotation.json)
+        // Phase 3: Clean up old slices and stale temp files (preserve rotation.json)
         let keep = Set(sliceFiles.map { $0.url.lastPathComponent } + ["rotation.json"])
         if let items = try? fm.contentsOfDirectory(at: supportDir, includingPropertiesForKeys: nil) {
             for url in items where !keep.contains(url.lastPathComponent) {
@@ -364,6 +379,8 @@ class RotationManager {
 
     private var timer: Timer?
     private(set) var config: RotationConfig?
+    /// Path of the last successfully applied image (for re-apply on screen change/wake).
+    var lastAppliedImagePath: String?
 
     var isActive: Bool { config != nil }
 
@@ -385,6 +402,7 @@ class RotationManager {
         timer?.invalidate()
         timer = nil
         config = nil
+        lastAppliedImagePath = nil
         RotationConfig.remove()
         uninstallLaunchAgent()
         Log.info("Rotation stopped.")
@@ -393,6 +411,12 @@ class RotationManager {
     func applyNext() {
         guard let config = config else { return }
         let folder = URL(fileURLWithPath: config.folderPath)
+
+        guard FileManager.default.isReadableFile(atPath: folder.path) else {
+            Log.info("Folder unavailable (ejected/missing?): \(config.folderPath) -- skipping tick")
+            return
+        }
+
         let images = imageFiles(in: folder)
         guard !images.isEmpty else {
             Log.info("No images in \(config.folderPath)")
@@ -402,10 +426,27 @@ class RotationManager {
         let next = pickNext(from: images, lastUsed: config.lastImagePath)
         do {
             try processImage(at: next.path)
+            lastAppliedImagePath = next.path
             self.config?.lastImagePath = next.path
             self.config?.save()
         } catch {
             Log.info("Rotation error: \(error)")
+        }
+    }
+
+    /// Re-apply the current wallpaper without advancing. Used after screen change or wake.
+    func reapplyCurrent() {
+        if let path = lastAppliedImagePath ?? config?.lastImagePath {
+            guard FileManager.default.fileExists(atPath: path) else {
+                Log.info("Last image no longer exists: \(path)")
+                return
+            }
+            do {
+                try processImage(at: path)
+                Log.info("Re-applied current wallpaper after display/wake change.")
+            } catch {
+                Log.info("Re-apply error: \(error)")
+            }
         }
     }
 
@@ -536,6 +577,7 @@ func processImage(at path: String) throws {
     }
 
     try WallpaperSetter.apply(slices: layout.slices, renderedImages: rendered)
+    RotationManager.shared.lastAppliedImagePath = path
     Log.info("Applied wallpaper across \(layout.slices.count) display(s).")
 }
 
@@ -935,6 +977,8 @@ class PreferencesController: NSObject {
 class AppDelegate: NSObject, NSApplicationDelegate {
     var prefsController: PreferencesController?
     private var hasProcessed = false
+    private var screenChangeDebounce: DispatchWorkItem?
+    private var isReapplying = false
 
     var window: NSWindow? { prefsController?.window }
 
@@ -944,6 +988,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if args.contains("--rotate") {
             if let config = RotationConfig.load() {
                 let folder = URL(fileURLWithPath: config.folderPath)
+                guard FileManager.default.isReadableFile(atPath: folder.path) else {
+                    Log.info("Folder unavailable (ejected/missing?): \(config.folderPath) -- skipping tick")
+                    NSApp.terminate(nil)
+                    return
+                }
                 let images = imageFiles(in: folder)
                 if let next = pickNextImage(from: images, lastUsed: config.lastImagePath) {
                     do {
@@ -986,7 +1035,56 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         RotationManager.shared.resume()
+        registerDisplayObservers()
         showPreferences()
+    }
+
+    // MARK: - Display change & wake observers
+
+    private func registerDisplayObservers() {
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(screenParametersChanged),
+            name: NSApplication.didChangeScreenParametersNotification,
+            object: nil
+        )
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(systemDidWake),
+            name: NSWorkspace.didWakeNotification,
+            object: nil
+        )
+    }
+
+    @objc private func screenParametersChanged(_ note: Notification) {
+        screenChangeDebounce?.cancel()
+        let work = DispatchWorkItem { [weak self] in self?.debouncedReapply(reason: "screen change") }
+        screenChangeDebounce = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0, execute: work)
+    }
+
+    @objc private func systemDidWake(_ note: Notification) {
+        screenChangeDebounce?.cancel()
+        let work = DispatchWorkItem { [weak self] in self?.debouncedReapply(reason: "wake") }
+        screenChangeDebounce = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0, execute: work)
+    }
+
+    private func debouncedReapply(reason: String) {
+        guard !isReapplying else {
+            Log.info("Re-apply already in progress, skipping (\(reason))")
+            return
+        }
+        guard RotationManager.shared.lastAppliedImagePath != nil else { return }
+
+        isReapplying = true
+        Log.info("Re-applying wallpaper after \(reason)...")
+        DispatchQueue.global(qos: .userInitiated).async {
+            RotationManager.shared.reapplyCurrent()
+            DispatchQueue.main.async { [weak self] in
+                self?.isReapplying = false
+            }
+        }
     }
 
     func application(_ sender: NSApplication, openFiles filenames: [String]) {
