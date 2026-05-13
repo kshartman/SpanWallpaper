@@ -62,56 +62,64 @@ enum WallpaperError: Error, CustomStringConvertible {
 
 struct ScreenSlice {
     let screen: NSScreen
-    let pixelOrigin: CGPoint
+    /// Position within the unified canvas, in points.
+    let pointOrigin: CGPoint
+    /// Size in points.
+    let pointSize: CGSize
+    /// Native pixel size: pointSize * backingScaleFactor.
     let pixelSize: CGSize
+    let scaleFactor: CGFloat
     let index: Int
 }
 
 struct ScreenLayout {
     let slices: [ScreenSlice]
-    let canvasPixelSize: CGSize
+    /// Combined canvas size in points (consistent coordinate space across DPIs).
+    let canvasPointSize: CGSize
 
     static func detect() throws -> ScreenLayout {
         let screens = NSScreen.screens
         guard !screens.isEmpty else { throw WallpaperError.noScreens }
 
-        struct Raw { let screen: NSScreen; let pxRect: CGRect }
-        let raws: [Raw] = screens.map { s in
-            let scale = s.backingScaleFactor
-            let f = s.frame
-            return Raw(screen: s, pxRect: CGRect(
-                x: f.origin.x * scale,
-                y: f.origin.y * scale,
-                width: f.size.width * scale,
-                height: f.size.height * scale
-            ))
-        }
+        // AppKit point frames: primary screen origin is (0,0) bottom-left;
+        // secondary screens have signed offsets. This is already DPI-independent.
+        let frames = screens.map { $0.frame }
 
-        let minX = raws.map { $0.pxRect.minX }.min()!
-        let maxX = raws.map { $0.pxRect.maxX }.max()!
-        let minY = raws.map { $0.pxRect.minY }.min()!
-        let maxY = raws.map { $0.pxRect.maxY }.max()!
+        let minX = frames.map { $0.minX }.min()!
+        let maxX = frames.map { $0.maxX }.max()!
+        let minY = frames.map { $0.minY }.min()!
+        let maxY = frames.map { $0.maxY }.max()!
 
         let canvas = CGSize(width: maxX - minX, height: maxY - minY)
 
-        let ordered = raws.sorted {
-            $0.pxRect.minX != $1.pxRect.minX
-                ? $0.pxRect.minX < $1.pxRect.minX
-                : $0.pxRect.minY < $1.pxRect.minY
-        }
+        struct Raw { let screen: NSScreen; let frame: CGRect }
+        let ordered = screens.map { Raw(screen: $0, frame: $0.frame) }
+            .sorted {
+                $0.frame.minX != $1.frame.minX
+                    ? $0.frame.minX < $1.frame.minX
+                    : $0.frame.minY < $1.frame.minY
+            }
 
+        // Convert AppKit bottom-left origin to top-left canvas coordinates.
         let slices: [ScreenSlice] = ordered.enumerated().map { (i, r) in
-            let px = r.pxRect.minX - minX
-            let py = maxY - r.pxRect.maxY
+            let scale = r.screen.backingScaleFactor
             return ScreenSlice(
                 screen: r.screen,
-                pixelOrigin: CGPoint(x: px, y: py),
-                pixelSize: r.pxRect.size,
+                pointOrigin: CGPoint(
+                    x: r.frame.minX - minX,
+                    y: maxY - r.frame.maxY
+                ),
+                pointSize: r.frame.size,
+                pixelSize: CGSize(
+                    width: r.frame.width * scale,
+                    height: r.frame.height * scale
+                ),
+                scaleFactor: scale,
                 index: i
             )
         }
 
-        return ScreenLayout(slices: slices, canvasPixelSize: canvas)
+        return ScreenLayout(slices: slices, canvasPointSize: canvas)
     }
 }
 
@@ -155,19 +163,22 @@ enum ImagePipeline {
         }
     }
 
+    /// Renders one screen's portion of the aspect-filled canvas.
+    /// Layout math uses point-space; output is at the screen's native pixel resolution.
     static func renderSlice(
         source: CGImage,
         sourceFillRect srcFill: CGRect,
-        canvas: CGSize,
+        canvasPoints: CGSize,
         slice: ScreenSlice
     ) throws -> CGImage {
-        let sx = srcFill.width / canvas.width
-        let sy = srcFill.height / canvas.height
+        // Map this screen's point-space rect into source-pixel coordinates.
+        let sx = srcFill.width / canvasPoints.width
+        let sy = srcFill.height / canvasPoints.height
         let srcRect = CGRect(
-            x: srcFill.origin.x + slice.pixelOrigin.x * sx,
-            y: srcFill.origin.y + slice.pixelOrigin.y * sy,
-            width: slice.pixelSize.width * sx,
-            height: slice.pixelSize.height * sy
+            x: srcFill.origin.x + slice.pointOrigin.x * sx,
+            y: srcFill.origin.y + slice.pointOrigin.y * sy,
+            width: slice.pointSize.width * sx,
+            height: slice.pointSize.height * sy
         )
 
         let cropRect = CGRect(
@@ -245,32 +256,54 @@ enum WallpaperSetter {
 
     static let configURL: URL = supportDir.appendingPathComponent("rotation.json")
 
+    /// Write all slices to disk, verify they exist, then apply all wallpapers
+    /// in a tight main-thread loop to minimize flicker.
     static func apply(slices: [ScreenSlice], renderedImages: [CGImage]) throws {
         precondition(slices.count == renderedImages.count, "slice/image count mismatch")
 
         let fm = FileManager.default
-        let options: [NSWorkspace.DesktopImageOptionKey: Any] = [
-            .imageScaling: NSNumber(value: NSImageScaling.scaleAxesIndependently.rawValue),
-            .allowClipping: NSNumber(value: true)
-        ]
-
         let runID = UUID().uuidString.prefix(8)
-        var written: [URL] = []
+
+        // Phase 1: Write all slices (can run off-main)
+        var sliceFiles: [(slice: ScreenSlice, url: URL)] = []
         for (slice, image) in zip(slices, renderedImages) {
             let url = supportDir.appendingPathComponent(
                 "slice-\(slice.index)-\(runID).png", isDirectory: false
             )
             try ImagePipeline.writePNG(image, to: url)
-            do {
-                try NSWorkspace.shared.setDesktopImageURL(url, for: slice.screen, options: options)
-            } catch {
-                throw WallpaperError.setWallpaperFailed(screenIndex: slice.index, underlying: error)
+            guard fm.fileExists(atPath: url.path) else {
+                throw WallpaperError.writeFailed(url, underlying: NSError(
+                    domain: "SpanWallpaper", code: 3,
+                    userInfo: [NSLocalizedDescriptionKey: "Written file not found on disk"]
+                ))
             }
-            written.append(url)
+            sliceFiles.append((slice, url))
         }
 
-        // Remove old slices only (preserve rotation.json)
-        let keep = Set(written.map { $0.lastPathComponent } + ["rotation.json"])
+        // Phase 2: Apply all wallpapers on main thread in a tight loop
+        let options: [NSWorkspace.DesktopImageOptionKey: Any] = [
+            .imageScaling: NSNumber(value: NSImageScaling.scaleAxesIndependently.rawValue),
+            .allowClipping: NSNumber(value: true)
+        ]
+
+        let applyBlock = {
+            for (slice, url) in sliceFiles {
+                do {
+                    try NSWorkspace.shared.setDesktopImageURL(url, for: slice.screen, options: options)
+                } catch {
+                    Log.info("Failed to set wallpaper on screen \(slice.index): \(error.localizedDescription)")
+                }
+            }
+        }
+
+        if Thread.isMainThread {
+            applyBlock()
+        } else {
+            DispatchQueue.main.sync { applyBlock() }
+        }
+
+        // Phase 3: Clean up old slices (preserve rotation.json)
+        let keep = Set(sliceFiles.map { $0.url.lastPathComponent } + ["rotation.json"])
         if let items = try? fm.contentsOfDirectory(at: supportDir, includingPropertiesForKeys: nil) {
             for url in items where !keep.contains(url.lastPathComponent) {
                 try? fm.removeItem(at: url)
@@ -481,23 +514,23 @@ func processImage(at path: String) throws {
     }
 
     let layout = try ScreenLayout.detect()
-    Log.info("Screens: \(layout.slices.count) -- canvas \(Int(layout.canvasPixelSize.width))x\(Int(layout.canvasPixelSize.height))px")
+    Log.info("Screens: \(layout.slices.count) -- canvas \(Int(layout.canvasPointSize.width))x\(Int(layout.canvasPointSize.height))pt")
     for s in layout.slices {
-        Log.info("  screen[\(s.index)] origin=(\(Int(s.pixelOrigin.x)),\(Int(s.pixelOrigin.y))) size=\(Int(s.pixelSize.width))x\(Int(s.pixelSize.height))px @\(s.screen.backingScaleFactor)x")
+        Log.info("  screen[\(s.index)] pt=(\(Int(s.pointOrigin.x)),\(Int(s.pointOrigin.y))) \(Int(s.pointSize.width))x\(Int(s.pointSize.height))pt -> \(Int(s.pixelSize.width))x\(Int(s.pixelSize.height))px @\(s.scaleFactor)x")
     }
 
     let source = try ImagePipeline.loadCGImage(from: inputURL)
     let sourceSize = CGSize(width: source.width, height: source.height)
     Log.info("Source: \(Int(sourceSize.width))x\(Int(sourceSize.height))px")
 
-    let fillRect = ImagePipeline.sourceFillRect(sourceSize: sourceSize, canvas: layout.canvasPixelSize)
+    let fillRect = ImagePipeline.sourceFillRect(sourceSize: sourceSize, canvas: layout.canvasPointSize)
     Log.info("Source crop rect: \(Int(fillRect.origin.x)),\(Int(fillRect.origin.y)) \(Int(fillRect.width))x\(Int(fillRect.height))")
 
     let rendered: [CGImage] = try layout.slices.map { slice in
         try ImagePipeline.renderSlice(
             source: source,
             sourceFillRect: fillRect,
-            canvas: layout.canvasPixelSize,
+            canvasPoints: layout.canvasPointSize,
             slice: slice
         )
     }
