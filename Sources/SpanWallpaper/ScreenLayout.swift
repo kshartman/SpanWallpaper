@@ -58,4 +58,10 @@ struct ScreenLayout {
 
         return ScreenLayout(slices: slices, canvasPointSize: canvas)
     }
+
+    var fingerprint: String {
+        slices.map { s in
+            "\(s.displayID):\(Int(s.pointOrigin.x)),\(Int(s.pointOrigin.y)):\(Int(s.pointSize.width))x\(Int(s.pointSize.height))@\(s.scaleFactor)"
+        }.joined(separator: "|")
+    }
 }

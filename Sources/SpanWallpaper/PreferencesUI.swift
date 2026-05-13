@@ -260,12 +260,17 @@ class PreferencesController: NSObject {
         applyButton.isEnabled = selectedPath != nil
 
         if rotating {
-            let images = imageFiles(in: URL(fileURLWithPath: rm.config!.folderPath))
-            let presetTitle = IntervalPreset.all[
-                IntervalPreset.indexForSeconds(rm.config!.intervalSeconds)
-            ].title.lowercased()
-            statusLabel.stringValue = "Rotating \(images.count) images, \(presetTitle)"
-            statusLabel.textColor = NSColor(red: 0.4, green: 0.8, blue: 0.5, alpha: 0.9)
+            if let errMsg = WallpaperSetter.readError() {
+                statusLabel.stringValue = "Last rotation error: \(errMsg)"
+                statusLabel.textColor = .systemRed
+            } else {
+                let images = imageFiles(in: URL(fileURLWithPath: rm.config!.folderPath))
+                let presetTitle = IntervalPreset.all[
+                    IntervalPreset.indexForSeconds(rm.config!.intervalSeconds)
+                ].title.lowercased()
+                statusLabel.stringValue = "Rotating \(images.count) images, \(presetTitle)"
+                statusLabel.textColor = NSColor(red: 0.4, green: 0.8, blue: 0.5, alpha: 0.9)
+            }
         } else {
             statusLabel.stringValue = ""
         }

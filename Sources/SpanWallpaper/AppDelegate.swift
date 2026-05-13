@@ -6,6 +6,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var hasProcessed = false
     private var screenChangeDebounce: DispatchWorkItem?
     private var isReapplying = false
+    private var lastLayoutFingerprint: String?
 
     var window: NSWindow? { prefsController?.window }
 
@@ -13,25 +14,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let args = CommandLine.arguments
 
         if args.contains("--rotate") {
-            if let config = RotationConfig.load() {
-                let folder = URL(fileURLWithPath: config.folderPath)
-                guard FileManager.default.isReadableFile(atPath: folder.path) else {
-                    Log.info("Folder unavailable (ejected/missing?): \(config.folderPath) -- skipping tick")
-                    NSApp.terminate(nil)
-                    return
-                }
-                let images = imageFiles(in: folder)
-                if let next = pickNextImage(from: images, lastUsed: config.lastImagePath) {
-                    do {
-                        try processImage(at: next.path)
-                        var updated = config
-                        updated.lastImagePath = next.path
-                        updated.save()
-                    } catch {
-                        Log.info("ERROR: \(error)")
-                    }
-                }
-            }
+            handleRotateTick()
             NSApp.terminate(nil)
             return
         }
@@ -64,6 +47,30 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         RotationManager.shared.resume()
         registerDisplayObservers()
         showPreferences()
+    }
+
+    private func handleRotateTick() {
+        guard let config = RotationConfig.load() else { return }
+        let folder = URL(fileURLWithPath: config.folderPath)
+        guard FileManager.default.isReadableFile(atPath: folder.path) else {
+            Log.info("Folder unavailable (ejected/missing?): \(config.folderPath) -- skipping tick")
+            return
+        }
+        FolderImageCache.shared.invalidate()
+        let images = imageFiles(in: folder)
+        guard let next = pickNextImage(from: images, lastUsed: config.lastImagePath) else { return }
+        do {
+            try WallpaperSetter.withProcessLock {
+                try processImage(at: next.path)
+                var updated = config
+                updated.lastImagePath = next.path
+                updated.save()
+            }
+            WallpaperSetter.clearError()
+        } catch {
+            Log.info("ERROR: \(error)")
+            WallpaperSetter.writeError("\(error)")
+        }
     }
 
     // MARK: - Display change & wake observers
@@ -123,10 +130,23 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         guard RotationManager.shared.lastAppliedImagePath != nil else { return }
 
+        if reason == "screen change" {
+            if let current = try? ScreenLayout.detect().fingerprint,
+               current == lastLayoutFingerprint {
+                Log.info("Layout unchanged after \(reason), skipping re-render")
+                return
+            }
+        }
+
         isReapplying = true
         Log.info("Re-applying wallpaper after \(reason)...")
         DispatchQueue.global(qos: .userInitiated).async {
             RotationManager.shared.reapplyCurrent()
+            if let fp = try? ScreenLayout.detect().fingerprint {
+                DispatchQueue.main.async { [weak self] in
+                    self?.lastLayoutFingerprint = fp
+                }
+            }
             DispatchQueue.main.async { [weak self] in
                 self?.isReapplying = false
             }

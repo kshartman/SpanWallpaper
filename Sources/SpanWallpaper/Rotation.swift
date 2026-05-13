@@ -49,7 +49,7 @@ extension RotationConfig {
 
     func save() {
         guard let data = try? JSONEncoder().encode(self) else { return }
-        try? data.write(to: WallpaperSetter.configURL)
+        try? data.write(to: WallpaperSetter.configURL, options: .atomic)
     }
 
     static func remove() {

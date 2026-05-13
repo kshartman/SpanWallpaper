@@ -16,24 +16,35 @@ enum WallpaperSetter {
     }()
 
     static let configURL: URL = supportDir.appendingPathComponent("rotation.json")
+    static let errorURL: URL = supportDir.appendingPathComponent("last-error.txt")
 
-    private(set) static var lastSliceFiles: [CGDirectDisplayID: URL] = [:]
+    private static let queue = DispatchQueue(label: "com.shartman.SpanWallpaper.sliceFiles")
+    private static var _lastSliceFiles: [CGDirectDisplayID: URL] = [:]
+
+    static var lastSliceFiles: [CGDirectDisplayID: URL] {
+        queue.sync { _lastSliceFiles }
+    }
 
     static func apply(sliceFiles: [(slice: ScreenSlice, url: URL)]) {
         var mapping: [CGDirectDisplayID: URL] = [:]
         for (slice, url) in sliceFiles { mapping[slice.displayID] = url }
-        lastSliceFiles = mapping
-        applyToCurrentScreens()
-        cleanupOldFiles(keeping: Set(mapping.values.map { $0.lastPathComponent }))
+
+        let snapshot = mapping
+        let keepSet = Set(mapping.values.map { $0.lastPathComponent })
+
+        queue.sync { _lastSliceFiles = mapping }
+        applyToCurrentScreens(snapshot: snapshot)
+        cleanupOldFiles(keeping: keepSet)
     }
 
     static func reapplyLastSlices() {
-        guard !lastSliceFiles.isEmpty else { return }
-        Log.info("Apply-only reapply (\(lastSliceFiles.count) cached slices)")
-        applyToCurrentScreens()
+        let snapshot = lastSliceFiles
+        guard !snapshot.isEmpty else { return }
+        Log.info("Apply-only reapply (\(snapshot.count) cached slices)")
+        applyToCurrentScreens(snapshot: snapshot)
     }
 
-    private static func applyToCurrentScreens() {
+    private static func applyToCurrentScreens(snapshot: [CGDirectDisplayID: URL]) {
         let options: [NSWorkspace.DesktopImageOptionKey: Any] = [
             .imageScaling: NSNumber(value: NSImageScaling.scaleAxesIndependently.rawValue),
             .allowClipping: NSNumber(value: true)
@@ -42,7 +53,7 @@ enum WallpaperSetter {
         let applyBlock = {
             for screen in NSScreen.screens {
                 let did = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID ?? 0
-                guard let url = lastSliceFiles[did] else {
+                guard let url = snapshot[did] else {
                     Log.info("  apply: no cached slice for displayID=\(did), skipping")
                     continue
                 }
@@ -70,5 +81,32 @@ enum WallpaperSetter {
                 try? fm.removeItem(at: url)
             }
         }
+    }
+
+    // MARK: - Error file
+
+    static func writeError(_ message: String) {
+        try? message.data(using: .utf8)?.write(to: errorURL)
+    }
+
+    static func clearError() {
+        try? FileManager.default.removeItem(at: errorURL)
+    }
+
+    static func readError() -> String? {
+        try? String(contentsOf: errorURL, encoding: .utf8)
+    }
+
+    // MARK: - Cross-process lock
+
+    private static let lockURL: URL = supportDir.appendingPathComponent(".lock")
+
+    static func withProcessLock<T>(_ body: () throws -> T) throws -> T {
+        let fd = open(lockURL.path, O_CREAT | O_RDWR, 0o644)
+        guard fd >= 0 else { return try body() }
+        defer { close(fd) }
+        flock(fd, LOCK_EX)
+        defer { flock(fd, LOCK_UN) }
+        return try body()
     }
 }
