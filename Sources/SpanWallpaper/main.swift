@@ -1,20 +1,9 @@
-#!/usr/bin/env swift
-//
-//  SpanWallpaper.swift
-//
-//  Native macOS app that sets a single image as the wallpaper, aspect-filled
-//  across every attached display treated as one unified pixel canvas, then
-//  sliced at the real pixel seams and applied per-screen.
-//
-//  Drop an image for one-shot, or drop a folder to rotate on a schedule.
-//  Right-click the Dock icon for "Next Wallpaper" / "Stop Rotation".
-//
-
 import AppKit
 import CoreGraphics
 import CoreImage
 import Foundation
 import ImageIO
+import SpanWallpaperLib
 import UniformTypeIdentifiers
 
 // MARK: - Logging
@@ -155,21 +144,6 @@ enum ImagePipeline {
         return baked
     }
 
-    static func sourceFillRect(sourceSize src: CGSize, canvas: CGSize) -> CGRect {
-        let srcAspect = src.width / src.height
-        let canvasAspect = canvas.width / canvas.height
-
-        if srcAspect > canvasAspect {
-            let cropW = src.height * canvasAspect
-            return CGRect(x: (src.width - cropW) / 2.0, y: 0,
-                          width: cropW, height: src.height)
-        } else {
-            let cropH = src.width / canvasAspect
-            return CGRect(x: 0, y: (src.height - cropH) / 2.0,
-                          width: src.width, height: cropH)
-        }
-    }
-
     /// Renders one screen's portion of the aspect-filled canvas.
     /// Layout math uses point-space; output is at the screen's native pixel resolution.
     static func renderSlice(
@@ -279,10 +253,7 @@ enum WallpaperSetter {
 
     static let configURL: URL = supportDir.appendingPathComponent("rotation.json")
 
-    private static let sliceFilePattern = try! NSRegularExpression(pattern: "^[0-9A-Fa-f]{8}_\\d+\\.jpg$")
-    private static let tempFilePattern = try! NSRegularExpression(pattern: "^\\.[0-9A-Fa-f-]+\\.tmp$")
-
-    /// Last rendered slice mapping: displayID → file URL. Used for apply-only Space reapply.
+    /// Last rendered slice mapping: displayID -> file URL. Used for apply-only Space reapply.
     private(set) static var lastSliceFiles: [CGDirectDisplayID: URL] = [:]
 
     /// Apply pre-written slice files as wallpapers, then clean up old files.
@@ -332,15 +303,9 @@ enum WallpaperSetter {
 
     private static func cleanupOldFiles(keeping keep: Set<String>) {
         let fm = FileManager.default
-        let preserve = keep.union(["rotation.json"])
         guard let items = try? fm.contentsOfDirectory(at: supportDir, includingPropertiesForKeys: nil) else { return }
         for url in items {
-            let name = url.lastPathComponent
-            if preserve.contains(name) { continue }
-            let range = NSRange(name.startIndex..., in: name)
-            let isSlice = sliceFilePattern.firstMatch(in: name, range: range) != nil
-            let isTemp = tempFilePattern.firstMatch(in: name, range: range) != nil
-            if isSlice || isTemp {
+            if SliceFileMatch.shouldClean(filename: url.lastPathComponent, keeping: keep) {
                 try? fm.removeItem(at: url)
             }
         }
@@ -348,8 +313,6 @@ enum WallpaperSetter {
 }
 
 // MARK: - Folder scanning
-
-let imageExtensions: Set<String> = ["jpg", "jpeg", "png", "heic", "heif", "tiff", "tif", "bmp", "webp"]
 
 private func scanImageFiles(in folderURL: URL) -> [URL] {
     let fm = FileManager.default
@@ -391,15 +354,9 @@ func imageFiles(in folderURL: URL) -> [URL] {
     FolderImageCache.shared.imageFiles(in: folderURL)
 }
 
-// MARK: - Rotation config
+// MARK: - Rotation config (persistence extension)
 
-struct RotationConfig: Codable {
-    var folderPath: String
-    var intervalSeconds: Int
-    var lastImagePath: String?
-
-    static let defaultInterval = 86400
-
+extension RotationConfig {
     static func load() -> RotationConfig? {
         guard let data = try? Data(contentsOf: WallpaperSetter.configURL) else { return nil }
         return try? JSONDecoder().decode(RotationConfig.self, from: data)
@@ -467,7 +424,10 @@ class RotationManager {
             return
         }
 
-        let next = pickNext(from: images, lastUsed: config.lastImagePath)
+        guard let next = pickNextImage(from: images, lastUsed: config.lastImagePath) else {
+            Log.info("No images in \(config.folderPath)")
+            return
+        }
         do {
             try processImage(at: next.path)
             lastAppliedImagePath = next.path
@@ -504,15 +464,6 @@ class RotationManager {
         config = saved
         scheduleTimer()
         Log.info("Resumed rotation: \(saved.folderPath)")
-    }
-
-    private func pickNext(from images: [URL], lastUsed: String?) -> URL {
-        guard let last = lastUsed,
-              let idx = images.firstIndex(where: { $0.path == last }) else {
-            return images.randomElement()!
-        }
-        let nextIdx = (idx + 1) % images.count
-        return images[nextIdx]
     }
 
     private func scheduleTimer() {
@@ -628,7 +579,7 @@ func processImage(at path: String) throws {
     let sourceSize = CGSize(width: source.width, height: source.height)
     Log.info("Source: \(Int(sourceSize.width))x\(Int(sourceSize.height))px")
 
-    let fillRect = ImagePipeline.sourceFillRect(sourceSize: sourceSize, canvas: layout.canvasPointSize)
+    let fillRect = ImageMath.sourceFillRect(sourceSize: sourceSize, canvas: layout.canvasPointSize)
     Log.info("Source crop rect: \(Int(fillRect.origin.x)),\(Int(fillRect.origin.y)) \(Int(fillRect.width))x\(Int(fillRect.height))")
 
     let runID = UUID().uuidString.prefix(8)
@@ -659,27 +610,6 @@ func showError(_ message: String) {
     alert.informativeText = message
     alert.alertStyle = .critical
     alert.runModal()
-}
-
-// MARK: - Interval presets
-
-struct IntervalPreset {
-    let title: String
-    let seconds: Int
-    static let all: [IntervalPreset] = [
-        IntervalPreset(title: "Every 30 minutes", seconds: 1800),
-        IntervalPreset(title: "Every hour", seconds: 3600),
-        IntervalPreset(title: "Every 6 hours", seconds: 21600),
-        IntervalPreset(title: "Every 12 hours", seconds: 43200),
-        IntervalPreset(title: "Every day", seconds: 86400),
-        IntervalPreset(title: "Every 3 days", seconds: 259200),
-        IntervalPreset(title: "Every week", seconds: 604800),
-    ]
-
-    static func indexForSeconds(_ s: Int) -> Int {
-        if let exact = all.firstIndex(where: { $0.seconds == s }) { return exact }
-        return all.firstIndex(where: { $0.seconds == 86400 }) ?? 4
-    }
 }
 
 // MARK: - Drop zone (top area of preferences window)
@@ -1250,18 +1180,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         pc.window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
-}
-
-// MARK: - Helpers
-
-func pickNextImage(from images: [URL], lastUsed: String?) -> URL? {
-    guard !images.isEmpty else { return nil }
-    guard let last = lastUsed,
-          let idx = images.firstIndex(where: { $0.path == last }) else {
-        return images.randomElement()
-    }
-    let nextIdx = (idx + 1) % images.count
-    return images[nextIdx]
 }
 
 // MARK: - Entry point

@@ -10,22 +10,24 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-SRC="$SCRIPT_DIR/SpanWallpaper.swift"
 APP_NAME="SpanWallpaper"
 APP="/Applications/$APP_NAME.app"
 
 WORK="$(mktemp -d -t spanwallpaper-build.XXXXXX)"
 trap 'rm -rf "$WORK"' EXIT
 
-for tool in /usr/bin/swift /usr/bin/swiftc /usr/bin/sips /usr/bin/iconutil; do
+for tool in /usr/bin/swift /usr/bin/sips /usr/bin/iconutil; do
     [[ -x "$tool" ]] || { echo "Missing: $tool" >&2; exit 1; }
 done
 
 # ---------------------------------------------------------------------------
-# 1) Compile
+# 1) Compile via SPM
 # ---------------------------------------------------------------------------
 echo "Compiling..."
-/usr/bin/swiftc -O -o "$WORK/$APP_NAME" "$SRC"
+(cd "$SCRIPT_DIR" && /usr/bin/swift build -c release 2>&1)
+SPM_BIN="$SCRIPT_DIR/.build/release/$APP_NAME"
+[[ -x "$SPM_BIN" ]] || { echo "Build failed: $SPM_BIN not found" >&2; exit 1; }
+cp "$SPM_BIN" "$WORK/$APP_NAME"
 echo "Built binary: $WORK/$APP_NAME"
 
 # ---------------------------------------------------------------------------
