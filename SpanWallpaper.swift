@@ -70,6 +70,10 @@ struct ScreenSlice {
     let pixelSize: CGSize
     let scaleFactor: CGFloat
     let index: Int
+
+    var displayID: CGDirectDisplayID {
+        screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID ?? 0
+    }
 }
 
 struct ScreenLayout {
@@ -127,6 +131,10 @@ struct ScreenLayout {
 
 enum ImagePipeline {
 
+    private static let ciContext = CIContext(options: [
+        .workingColorSpace: CGColorSpace(name: CGColorSpace.sRGB) as Any
+    ])
+
     static func loadCGImage(from url: URL) throws -> CGImage {
         guard let src = CGImageSourceCreateWithURL(url as CFURL, nil) else {
             throw WallpaperError.imageLoadFailed(url)
@@ -141,8 +149,7 @@ enum ImagePipeline {
 
         let ci = CIImage(cgImage: raw)
             .oriented(forExifOrientation: Int32(orientation))
-        let ctx = CIContext(options: [.workingColorSpace: CGColorSpace(name: CGColorSpace.sRGB) as Any])
-        guard let baked = ctx.createCGImage(ci, from: ci.extent) else {
+        guard let baked = ciContext.createCGImage(ci, from: ci.extent) else {
             throw WallpaperError.imageLoadFailed(url)
         }
         return baked
@@ -215,14 +222,14 @@ enum ImagePipeline {
         return out
     }
 
-    /// Writes PNG atomically: renders to a temp file, then renames into place.
-    static func writePNG(_ image: CGImage, to url: URL) throws {
+    /// Writes JPEG atomically: renders to a temp file, then renames into place.
+    static func writeJPEG(_ image: CGImage, to url: URL, quality: CGFloat = 0.92) throws {
         let tempURL = url.deletingLastPathComponent()
             .appendingPathComponent(".\(UUID().uuidString).tmp", isDirectory: false)
 
         guard let dest = CGImageDestinationCreateWithURL(
             tempURL as CFURL,
-            UTType.png.identifier as CFString,
+            UTType.jpeg.identifier as CFString,
             1,
             nil
         ) else {
@@ -231,7 +238,8 @@ enum ImagePipeline {
                 userInfo: [NSLocalizedDescriptionKey: "CGImageDestination init failed"]
             ))
         }
-        CGImageDestinationAddImage(dest, image, nil)
+        let opts: [CFString: Any] = [kCGImageDestinationLossyCompressionQuality: quality]
+        CGImageDestinationAddImage(dest, image, opts as CFDictionary)
         guard CGImageDestinationFinalize(dest) else {
             try? FileManager.default.removeItem(at: tempURL)
             throw WallpaperError.writeFailed(url, underlying: NSError(
@@ -271,42 +279,46 @@ enum WallpaperSetter {
 
     static let configURL: URL = supportDir.appendingPathComponent("rotation.json")
 
-    /// Write all slices to disk, verify they exist, then apply all wallpapers
-    /// in a tight main-thread loop to minimize flicker.
-    static func apply(slices: [ScreenSlice], renderedImages: [CGImage]) throws {
-        precondition(slices.count == renderedImages.count, "slice/image count mismatch")
+    private static let sliceFilePattern = try! NSRegularExpression(pattern: "^[0-9A-Fa-f]{8}_\\d+\\.jpg$")
+    private static let tempFilePattern = try! NSRegularExpression(pattern: "^\\.[0-9A-Fa-f-]+\\.tmp$")
 
-        let fm = FileManager.default
-        let runID = UUID().uuidString.prefix(8)
+    /// Last rendered slice mapping: displayID → file URL. Used for apply-only Space reapply.
+    private(set) static var lastSliceFiles: [CGDirectDisplayID: URL] = [:]
 
-        // Phase 1: Write all slices (can run off-main)
-        var sliceFiles: [(slice: ScreenSlice, url: URL)] = []
-        for (slice, image) in zip(slices, renderedImages) {
-            let url = supportDir.appendingPathComponent(
-                "slice-\(slice.index)-\(runID).png", isDirectory: false
-            )
-            try ImagePipeline.writePNG(image, to: url)
-            guard fm.fileExists(atPath: url.path) else {
-                throw WallpaperError.writeFailed(url, underlying: NSError(
-                    domain: "SpanWallpaper", code: 3,
-                    userInfo: [NSLocalizedDescriptionKey: "Written file not found on disk"]
-                ))
-            }
-            sliceFiles.append((slice, url))
-        }
+    /// Apply pre-written slice files as wallpapers, then clean up old files.
+    static func apply(sliceFiles: [(slice: ScreenSlice, url: URL)]) {
+        var mapping: [CGDirectDisplayID: URL] = [:]
+        for (slice, url) in sliceFiles { mapping[slice.displayID] = url }
+        lastSliceFiles = mapping
+        applyToCurrentScreens()
+        cleanupOldFiles(keeping: Set(mapping.values.map { $0.lastPathComponent }))
+    }
 
-        // Phase 2: Apply all wallpapers on main thread in a tight loop
+    /// Apply-only: reuse last rendered slices without re-rendering. For Space changes.
+    static func reapplyLastSlices() {
+        guard !lastSliceFiles.isEmpty else { return }
+        Log.info("Apply-only reapply (\(lastSliceFiles.count) cached slices)")
+        applyToCurrentScreens()
+    }
+
+    private static func applyToCurrentScreens() {
         let options: [NSWorkspace.DesktopImageOptionKey: Any] = [
             .imageScaling: NSNumber(value: NSImageScaling.scaleAxesIndependently.rawValue),
             .allowClipping: NSNumber(value: true)
         ]
 
         let applyBlock = {
-            for (slice, url) in sliceFiles {
+            for screen in NSScreen.screens {
+                let did = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID ?? 0
+                guard let url = lastSliceFiles[did] else {
+                    Log.info("  apply: no cached slice for displayID=\(did), skipping")
+                    continue
+                }
+                Log.info("  apply displayID=\(did) frame=\(screen.frame) scale=\(screen.backingScaleFactor) -> \(url.lastPathComponent)")
                 do {
-                    try NSWorkspace.shared.setDesktopImageURL(url, for: slice.screen, options: options)
+                    try NSWorkspace.shared.setDesktopImageURL(url, for: screen, options: options)
                 } catch {
-                    Log.info("Failed to set wallpaper on screen \(slice.index): \(error.localizedDescription)")
+                    Log.info("  FAILED displayID=\(did): \(error.localizedDescription)")
                 }
             }
         }
@@ -314,13 +326,21 @@ enum WallpaperSetter {
         if Thread.isMainThread {
             applyBlock()
         } else {
-            DispatchQueue.main.sync { applyBlock() }
+            DispatchQueue.main.async { applyBlock() }
         }
+    }
 
-        // Phase 3: Clean up old slices and stale temp files (preserve rotation.json)
-        let keep = Set(sliceFiles.map { $0.url.lastPathComponent } + ["rotation.json"])
-        if let items = try? fm.contentsOfDirectory(at: supportDir, includingPropertiesForKeys: nil) {
-            for url in items where !keep.contains(url.lastPathComponent) {
+    private static func cleanupOldFiles(keeping keep: Set<String>) {
+        let fm = FileManager.default
+        let preserve = keep.union(["rotation.json"])
+        guard let items = try? fm.contentsOfDirectory(at: supportDir, includingPropertiesForKeys: nil) else { return }
+        for url in items {
+            let name = url.lastPathComponent
+            if preserve.contains(name) { continue }
+            let range = NSRange(name.startIndex..., in: name)
+            let isSlice = sliceFilePattern.firstMatch(in: name, range: range) != nil
+            let isTemp = tempFilePattern.firstMatch(in: name, range: range) != nil
+            if isSlice || isTemp {
                 try? fm.removeItem(at: url)
             }
         }
@@ -331,7 +351,7 @@ enum WallpaperSetter {
 
 let imageExtensions: Set<String> = ["jpg", "jpeg", "png", "heic", "heif", "tiff", "tif", "bmp", "webp"]
 
-func imageFiles(in folderURL: URL) -> [URL] {
+private func scanImageFiles(in folderURL: URL) -> [URL] {
     let fm = FileManager.default
     guard let enumerator = fm.enumerator(
         at: folderURL,
@@ -346,6 +366,29 @@ func imageFiles(in folderURL: URL) -> [URL] {
         }
     }
     return images.sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
+}
+
+final class FolderImageCache {
+    static let shared = FolderImageCache()
+    private var cachedPath: String?
+    private var cachedFiles: [URL] = []
+
+    func imageFiles(in folderURL: URL) -> [URL] {
+        let path = folderURL.path
+        if path == cachedPath { return cachedFiles }
+        cachedFiles = scanImageFiles(in: folderURL)
+        cachedPath = path
+        return cachedFiles
+    }
+
+    func invalidate() {
+        cachedPath = nil
+        cachedFiles = []
+    }
+}
+
+func imageFiles(in folderURL: URL) -> [URL] {
+    FolderImageCache.shared.imageFiles(in: folderURL)
 }
 
 // MARK: - Rotation config
@@ -417,6 +460,7 @@ class RotationManager {
             return
         }
 
+        FolderImageCache.shared.invalidate()
         let images = imageFiles(in: folder)
         guard !images.isEmpty else {
             Log.info("No images in \(config.folderPath)")
@@ -492,8 +536,28 @@ class RotationManager {
         Bundle.main.executablePath ?? "/Applications/SpanWallpaper.app/Contents/MacOS/SpanWallpaper"
     }
 
+    private static func xmlEscape(_ s: String) -> String {
+        s.replacingOccurrences(of: "&", with: "&amp;")
+         .replacingOccurrences(of: "<", with: "&lt;")
+         .replacingOccurrences(of: ">", with: "&gt;")
+         .replacingOccurrences(of: "\"", with: "&quot;")
+    }
+
     private func installLaunchAgent() {
         guard let config = config else { return }
+        let binaryXML = RotationManager.xmlEscape(appBinaryPath)
+        var envBlock = ""
+        if let customDir = ProcessInfo.processInfo.environment["SPAN_WALLPAPER_DIR"] {
+            let escaped = RotationManager.xmlEscape(customDir)
+            envBlock = """
+
+                <key>EnvironmentVariables</key>
+                <dict>
+                    <key>SPAN_WALLPAPER_DIR</key>
+                    <string>\(escaped)</string>
+                </dict>
+            """
+        }
         let plist = """
         <?xml version="1.0" encoding="UTF-8"?>
         <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
@@ -504,7 +568,7 @@ class RotationManager {
             <string>com.shartman.SpanWallpaper</string>
             <key>ProgramArguments</key>
             <array>
-                <string>\(appBinaryPath)</string>
+                <string>\(binaryXML)</string>
                 <string>--rotate</string>
             </array>
             <key>StartInterval</key>
@@ -512,7 +576,7 @@ class RotationManager {
             <key>RunAtLoad</key>
             <true/>
             <key>StandardErrorPath</key>
-            <string>/tmp/SpanWallpaper.log</string>
+            <string>/tmp/SpanWallpaper.log</string>\(envBlock)
         </dict>
         </plist>
         """
@@ -567,16 +631,24 @@ func processImage(at path: String) throws {
     let fillRect = ImagePipeline.sourceFillRect(sourceSize: sourceSize, canvas: layout.canvasPointSize)
     Log.info("Source crop rect: \(Int(fillRect.origin.x)),\(Int(fillRect.origin.y)) \(Int(fillRect.width))x\(Int(fillRect.height))")
 
-    let rendered: [CGImage] = try layout.slices.map { slice in
-        try ImagePipeline.renderSlice(
+    let runID = UUID().uuidString.prefix(8)
+    var sliceFiles: [(slice: ScreenSlice, url: URL)] = []
+    sliceFiles.reserveCapacity(layout.slices.count)
+
+    for slice in layout.slices {
+        let rendered = try ImagePipeline.renderSlice(
             source: source,
             sourceFillRect: fillRect,
             canvasPoints: layout.canvasPointSize,
             slice: slice
         )
+        let filename = "\(runID)_\(slice.displayID).jpg"
+        let fileURL = WallpaperSetter.supportDir.appendingPathComponent(filename)
+        try ImagePipeline.writeJPEG(rendered, to: fileURL)
+        sliceFiles.append((slice: slice, url: fileURL))
     }
 
-    try WallpaperSetter.apply(slices: layout.slices, renderedImages: rendered)
+    WallpaperSetter.apply(sliceFiles: sliceFiles)
     RotationManager.shared.lastAppliedImagePath = path
     Log.info("Applied wallpaper across \(layout.slices.count) display(s).")
 }
@@ -1041,6 +1113,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Display change & wake observers
 
+    private var spaceChangeDebounce: DispatchWorkItem?
+
     private func registerDisplayObservers() {
         NotificationCenter.default.addObserver(
             self,
@@ -1054,6 +1128,23 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             name: NSWorkspace.didWakeNotification,
             object: nil
         )
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(activeSpaceChanged),
+            name: NSWorkspace.activeSpaceDidChangeNotification,
+            object: nil
+        )
+    }
+
+    @objc private func activeSpaceChanged(_ note: Notification) {
+        spaceChangeDebounce?.cancel()
+        let work = DispatchWorkItem {
+            guard RotationManager.shared.lastAppliedImagePath != nil else { return }
+            Log.info("Space changed -- apply-only reapply")
+            WallpaperSetter.reapplyLastSlices()
+        }
+        spaceChangeDebounce = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: work)
     }
 
     @objc private func screenParametersChanged(_ note: Notification) {
