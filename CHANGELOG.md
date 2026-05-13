@@ -14,7 +14,7 @@ Initial release.
 - Auto-reapply on screen changes, wake from sleep, and Space switches
 - Supports JPEG, PNG, HEIC, HEIF, TIFF, BMP, and WebP
 
-### Architecture
+### Under the hood
 - SPM package with testable library (`SpanWallpaperLib`) and executable target
 - 25 unit tests covering image math, rotation logic, and file cleanup
 - Cross-process file locking (flock) between UI and launchd agent

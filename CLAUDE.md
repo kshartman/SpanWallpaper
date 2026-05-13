@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-SpanWallpaper -- a single-file native macOS app (Swift, AppKit) that spans one wallpaper image across all displays. It aspect-fills the image over the unified point-space canvas, slices it per-screen at native pixel resolution, and applies each slice via `NSWorkspace.setDesktopImageURL`. Supports folder-based rotation with a launchd agent for persistence.
+SpanWallpaper -- a native macOS app (Swift, AppKit) that spans one wallpaper image across all displays. It aspect-fills the image over the unified point-space canvas, slices it per-screen at native pixel resolution, and applies each slice via `NSWorkspace.setDesktopImageURL`. Supports folder-based rotation with a launchd agent for persistence.
 
 ## Build & Run
 
@@ -30,8 +30,8 @@ SPM project with a library target (`SpanWallpaperLib`) for testable pure functio
 
 SPM package with three targets:
 - `SpanWallpaperLib` (`Sources/SpanWallpaperLib/`) -- pure functions: `ImageMath.sourceFillRect`, `pickNextImage`, `RotationConfig` (Codable), `IntervalPreset`, `SliceFileMatch`, `imageExtensions`. No AppKit dependency.
-- `SpanWallpaper` (`Sources/SpanWallpaper/main.swift`) -- the app. Imports the lib.
-- `SpanWallpaperTests` (`Tests/SpanWallpaperTests/`) -- XCTest suite for the lib.
+- `SpanWallpaper` (`Sources/SpanWallpaper/`) -- the app, split into 8 files: `main.swift` (entry point), `AppDelegate.swift`, `ScreenLayout.swift`, `ImagePipeline.swift`, `WallpaperSetter.swift`, `Rotation.swift`, `PreferencesUI.swift`, `Utilities.swift`.
+- `SpanWallpaperTests` (`Tests/SpanWallpaperTests/`) -- XCTest suite for the lib (25 tests).
 
 Key components:
 
@@ -46,6 +46,8 @@ Key components:
 
 - Slice storage: `~/Library/Application Support/SpanWallpaper/` (overridable via `SPAN_WALLPAPER_DIR` env var or symlink)
 - Rotation config: `~/Library/Application Support/SpanWallpaper/rotation.json`
+- Error file: `~/Library/Application Support/SpanWallpaper/last-error.txt` (cross-process error reporting from launchd agent)
+- Process lock: `~/Library/Application Support/SpanWallpaper/.lock` (flock-based)
 - LaunchAgent: `~/Library/LaunchAgents/com.shartman.SpanWallpaper.plist`
 - Logs: stderr (or `/tmp/SpanWallpaper.log` when run via launchd)
 
@@ -56,3 +58,5 @@ Key components:
 - Space changes use **apply-only reapply** (cached slices, no re-render) for speed. Screen changes and wake trigger **full re-render** via `reapplyCurrent()`.
 - JPEG writes are **atomic** (write to `.tmp`, then rename) to avoid corrupted wallpapers if the process is killed mid-write.
 - Slice filenames use `{8-char-runID}_{displayID}.jpg` pattern. Old slices are cleaned up by regex after each apply.
+- **Cross-process locking** via `flock` prevents the UI process and launchd agent from colliding on shared state files.
+- **Layout fingerprinting** (displayID + frame + scale) skips redundant re-renders when macOS fires screen-change notifications without actual layout changes.

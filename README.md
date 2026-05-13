@@ -50,7 +50,16 @@ ln -s /Volumes/SSD/SpanWallpaper ~/Library/Application\ Support/SpanWallpaper
 export SPAN_WALLPAPER_DIR=/Volumes/SSD/SpanWallpaper
 ```
 
+## Supported Formats
+
+JPEG, PNG, HEIC, HEIF, TIFF, BMP, and WebP.
+
 ## Requirements
 
 - macOS 11+
 - Xcode Command Line Tools (`xcode-select --install`)
+
+## Docs
+
+- [Changelog](CHANGELOG.md)
+- [Open issues](TODOS.md)
