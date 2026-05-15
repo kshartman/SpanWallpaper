@@ -79,7 +79,7 @@ class DropZoneView: NSView {
     }
 }
 
-class PreferencesController: NSObject {
+class PreferencesController: NSObject, NSTextFieldDelegate {
     let window: NSWindow
     private let dropZone = DropZoneView(frame: .zero)
     private let pathLabel = NSTextField(labelWithString: "No selection")
@@ -287,6 +287,10 @@ class PreferencesController: NSObject {
             field.focusRingType = .none
         }
 
+        for field in [excludeField, minWidthField, minHeightField, maxWidthField, maxHeightField] {
+            field.delegate = self
+        }
+
         excludeField.placeholderString = "additional patterns"
         minWidthField.placeholderString = "width"
         minHeightField.placeholderString = "height"
@@ -337,6 +341,10 @@ class PreferencesController: NSObject {
     }
 
     @objc private func filterChanged() {
+        saveFiltersToConfig()
+    }
+
+    func controlTextDidEndEditing(_ obj: Notification) {
         saveFiltersToConfig()
     }
 
@@ -635,6 +643,7 @@ class PreferencesController: NSObject {
 
     private func applySelection() {
         guard let path = selectedPath else { return }
+        saveFiltersToConfig()
 
         if selectedIsFolder {
             let options = ScanOptions(from: RotationManager.shared.config ?? AppConfig())
