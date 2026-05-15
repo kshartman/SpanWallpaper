@@ -168,6 +168,27 @@ class RotationManager {
         }
     }
 
+    func applyPrevious() {
+        guard let config = config, config.playMode == .sequential,
+              let folderPath = config.folderPath else { return }
+        let folder = URL(fileURLWithPath: folderPath)
+        guard FileManager.default.isReadableFile(atPath: folder.path) else { return }
+
+        FolderImageCache.shared.invalidate()
+        let options = scanOptions()
+        let images = imageFiles(in: folder, options: options)
+        guard let prev = pickPreviousImage(from: images, lastUsed: config.lastImagePath) else { return }
+
+        do {
+            try processImage(at: prev.path, displayMode: config.displayMode)
+            lastAppliedImagePath = prev.path
+            self.config?.lastImagePath = prev.path
+            self.config?.save()
+        } catch {
+            Log.info("Previous error: \(error)")
+        }
+    }
+
     func reapplyCurrent() {
         if let path = lastAppliedImagePath ?? config?.lastImagePath {
             guard FileManager.default.fileExists(atPath: path) else {

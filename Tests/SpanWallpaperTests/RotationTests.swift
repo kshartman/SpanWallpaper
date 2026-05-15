@@ -215,3 +215,46 @@ final class PickNextTests: XCTestCase {
         XCTAssertTrue(list.contains(result!))
     }
 }
+
+// MARK: - Previous Image Selection
+
+final class PickPreviousTests: XCTestCase {
+
+    private func urls(_ names: String...) -> [URL] {
+        names.map { URL(fileURLWithPath: "/images/\($0)") }
+    }
+
+    func testEmptyReturnsNil() {
+        XCTAssertNil(pickPreviousImage(from: [], lastUsed: nil))
+    }
+
+    func testSingleReturnsIt() {
+        let list = urls("a.jpg")
+        XCTAssertEqual(pickPreviousImage(from: list, lastUsed: nil), list[0])
+    }
+
+    func testNoLastUsedReturnsLast() {
+        let list = urls("a.jpg", "b.jpg", "c.jpg")
+        XCTAssertEqual(pickPreviousImage(from: list, lastUsed: nil), list[2])
+    }
+
+    func testStepsBackward() {
+        let list = urls("a.jpg", "b.jpg", "c.jpg")
+        XCTAssertEqual(pickPreviousImage(from: list, lastUsed: "/images/c.jpg"), list[1])
+    }
+
+    func testWrapsToEnd() {
+        let list = urls("a.jpg", "b.jpg", "c.jpg")
+        XCTAssertEqual(pickPreviousImage(from: list, lastUsed: "/images/a.jpg"), list[2])
+    }
+
+    func testDeletedLastUsedReturnsLast() {
+        let list = urls("a.jpg", "b.jpg")
+        XCTAssertEqual(pickPreviousImage(from: list, lastUsed: "/images/gone.jpg"), list[1])
+    }
+
+    func testMiddleStepsBack() {
+        let list = urls("a.jpg", "b.jpg", "c.jpg")
+        XCTAssertEqual(pickPreviousImage(from: list, lastUsed: "/images/b.jpg"), list[0])
+    }
+}

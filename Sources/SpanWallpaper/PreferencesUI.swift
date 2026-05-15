@@ -92,11 +92,28 @@ class PreferencesController: NSObject {
     private let displayModeLabel = NSTextField(labelWithString: "Display:")
     private let applyButton = NSButton(title: "Apply", target: nil, action: nil)
     private let nextButton = NSButton(title: "Next", target: nil, action: nil)
+    private let backButton = NSButton(title: "Back", target: nil, action: nil)
     private let retireButton = NSButton(title: "Retire", target: nil, action: nil)
     private let stopButton = NSButton(title: "Stop Rotation", target: nil, action: nil)
     private let statusLabel = NSTextField(labelWithString: "")
     private let separator = NSBox()
 
+    private let filterToggle = NSButton(title: "Filters", target: nil, action: nil)
+    private let filterContainer = NSView()
+    private let recursiveCheckbox = NSButton(checkboxWithTitle: "Scan subfolders", target: nil, action: nil)
+    private let excludeLabel = NSTextField(labelWithString: "Exclude:")
+    private let excludeField = NSTextField()
+    private let minWidthLabel = NSTextField(labelWithString: "Min size:")
+    private let minWidthField = NSTextField()
+    private let minHeightField = NSTextField()
+    private let minSizeX = NSTextField(labelWithString: "x")
+    private let maxWidthLabel = NSTextField(labelWithString: "Max size:")
+    private let maxWidthField = NSTextField()
+    private let maxHeightField = NSTextField()
+    private let maxSizeX = NSTextField(labelWithString: "x")
+
+    private var filtersExpanded = false
+    private var filterContainerHeight: NSLayoutConstraint!
     private var selectedPath: String?
     private var selectedIsFolder = false
 
@@ -120,10 +137,18 @@ class PreferencesController: NSObject {
         for v: NSView in [dropZone, pathLabel, browseButton, intervalLabel,
                           intervalPopup, playModeLabel, playModePopup,
                           displayModeLabel, displayModePopup,
-                          applyButton, nextButton, retireButton, stopButton,
+                          filterToggle, filterContainer,
+                          applyButton, nextButton, backButton, retireButton, stopButton,
                           statusLabel, separator] {
             v.translatesAutoresizingMaskIntoConstraints = false
             content.addSubview(v)
+        }
+
+        for v: NSView in [recursiveCheckbox, excludeLabel, excludeField,
+                          minWidthLabel, minWidthField, minSizeX, minHeightField,
+                          maxWidthLabel, maxWidthField, maxSizeX, maxHeightField] {
+            v.translatesAutoresizingMaskIntoConstraints = false
+            filterContainer.addSubview(v)
         }
 
         setupDropZone()
@@ -131,10 +156,21 @@ class PreferencesController: NSObject {
         setupSeparator()
         setupIntervalRow()
         setupDisplayRow()
+        setupFilterSection()
         setupActionRow()
         setupStatusRow()
         layoutConstraints()
 
+        NotificationCenter.default.addObserver(self, selector: #selector(externalSyncUI),
+                                               name: .spanWallpaperSyncUI, object: nil)
+        syncUI()
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
+
+    @objc private func externalSyncUI() {
         syncUI()
     }
 
@@ -199,6 +235,105 @@ class PreferencesController: NSObject {
         displayModePopup.action = #selector(displayModeChanged)
     }
 
+    private func setupFilterSection() {
+        filterToggle.bezelStyle = .disclosure
+        filterToggle.setButtonType(.pushOnPushOff)
+        filterToggle.title = "Filters"
+        filterToggle.target = self
+        filterToggle.action = #selector(filterToggleTapped)
+        filterToggle.state = .off
+
+        filterContainer.isHidden = true
+        filterContainerHeight = filterContainer.heightAnchor.constraint(equalToConstant: 0)
+        filterContainerHeight.isActive = true
+
+        recursiveCheckbox.target = self
+        recursiveCheckbox.action = #selector(filterChanged)
+
+        for label in [excludeLabel, minWidthLabel, maxWidthLabel, minSizeX, maxSizeX] {
+            label.textColor = NSColor(white: 0.6, alpha: 1)
+            label.font = NSFont.systemFont(ofSize: 12)
+        }
+
+        for field in [excludeField, minWidthField, minHeightField, maxWidthField, maxHeightField] {
+            field.font = NSFont.systemFont(ofSize: 12)
+            field.isBordered = true
+            field.drawsBackground = true
+            field.backgroundColor = NSColor(white: 0.15, alpha: 1)
+            field.textColor = .white
+            field.focusRingType = .none
+        }
+
+        excludeField.placeholderString = "retired, temp"
+        for field in [minWidthField, minHeightField, maxWidthField, maxHeightField] {
+            field.placeholderString = ""
+        }
+
+        let config = RotationManager.shared.config ?? AppConfig()
+        recursiveCheckbox.state = config.recursive ? .on : .off
+        excludeField.stringValue = config.excludePatterns.joined(separator: ", ")
+        minWidthField.stringValue = config.minWidth.map(String.init) ?? ""
+        minHeightField.stringValue = config.minHeight.map(String.init) ?? ""
+        maxWidthField.stringValue = config.maxWidth.map(String.init) ?? ""
+        maxHeightField.stringValue = config.maxHeight.map(String.init) ?? ""
+    }
+
+    private func activeFilterCount() -> Int {
+        let config = RotationManager.shared.config ?? AppConfig()
+        var count = 0
+        if !config.recursive { count += 1 }
+        if config.excludePatterns != ["retired"] { count += 1 }
+        if config.minWidth != nil { count += 1 }
+        if config.minHeight != nil { count += 1 }
+        if config.maxWidth != nil { count += 1 }
+        if config.maxHeight != nil { count += 1 }
+        return count
+    }
+
+    private func updateFilterToggleTitle() {
+        let count = activeFilterCount()
+        filterToggle.title = count > 0 ? "Filters (\(count) active)" : "Filters"
+    }
+
+    @objc private func filterToggleTapped() {
+        filtersExpanded = filterToggle.state == .on
+        let expandedHeight: CGFloat = 110
+        let delta = filtersExpanded ? expandedHeight : -expandedHeight
+
+        filterContainer.isHidden = !filtersExpanded
+        filterContainerHeight.constant = filtersExpanded ? expandedHeight : 0
+
+        var frame = window.frame
+        frame.size.height += delta
+        frame.origin.y -= delta
+        window.setFrame(frame, display: true, animate: true)
+    }
+
+    @objc private func filterChanged() {
+        saveFiltersToConfig()
+    }
+
+    private func saveFiltersToConfig() {
+        var config = RotationManager.shared.config ?? AppConfig()
+        config.recursive = recursiveCheckbox.state == .on
+
+        let raw = excludeField.stringValue
+        let patterns = raw.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        config.excludePatterns = patterns.isEmpty ? ["retired"] : patterns
+
+        config.minWidth = Int(minWidthField.stringValue)
+        config.minHeight = Int(minHeightField.stringValue)
+        config.maxWidth = Int(maxWidthField.stringValue)
+        config.maxHeight = Int(maxHeightField.stringValue)
+
+        RotationManager.shared.config = config
+        config.save()
+
+        FolderImageCache.shared.invalidate()
+        updateFilterToggleTitle()
+        syncUI()
+    }
+
     private func setupActionRow() {
         applyButton.target = self
         applyButton.action = #selector(applyTapped)
@@ -208,6 +343,10 @@ class PreferencesController: NSObject {
         nextButton.target = self
         nextButton.action = #selector(nextTapped)
         nextButton.bezelStyle = .rounded
+
+        backButton.target = self
+        backButton.action = #selector(backTapped)
+        backButton.bezelStyle = .rounded
 
         retireButton.target = self
         retireButton.action = #selector(retireTapped)
@@ -275,12 +414,71 @@ class PreferencesController: NSObject {
             displayModePopup.leadingAnchor.constraint(equalTo: displayModeLabel.trailingAnchor, constant: 6),
             displayModePopup.trailingAnchor.constraint(equalTo: c.trailingAnchor, constant: -m),
 
+            // Filter toggle
+            filterToggle.topAnchor.constraint(equalTo: playModePopup.bottomAnchor, constant: 10),
+            filterToggle.leadingAnchor.constraint(equalTo: c.leadingAnchor, constant: m),
+
+            // Filter container
+            filterContainer.topAnchor.constraint(equalTo: filterToggle.bottomAnchor, constant: 4),
+            filterContainer.leadingAnchor.constraint(equalTo: c.leadingAnchor, constant: m + 16),
+            filterContainer.trailingAnchor.constraint(equalTo: c.trailingAnchor, constant: -m),
+
+            // Filter contents
+            recursiveCheckbox.topAnchor.constraint(equalTo: filterContainer.topAnchor, constant: 4),
+            recursiveCheckbox.leadingAnchor.constraint(equalTo: filterContainer.leadingAnchor),
+
+            excludeLabel.topAnchor.constraint(equalTo: recursiveCheckbox.bottomAnchor, constant: 8),
+            excludeLabel.leadingAnchor.constraint(equalTo: filterContainer.leadingAnchor),
+            excludeLabel.widthAnchor.constraint(equalToConstant: 55),
+
+            excludeField.centerYAnchor.constraint(equalTo: excludeLabel.centerYAnchor),
+            excludeField.leadingAnchor.constraint(equalTo: excludeLabel.trailingAnchor, constant: 6),
+            excludeField.trailingAnchor.constraint(equalTo: filterContainer.trailingAnchor),
+            excludeField.heightAnchor.constraint(equalToConstant: 22),
+
+            minWidthLabel.topAnchor.constraint(equalTo: excludeField.bottomAnchor, constant: 8),
+            minWidthLabel.leadingAnchor.constraint(equalTo: filterContainer.leadingAnchor),
+            minWidthLabel.widthAnchor.constraint(equalToConstant: 55),
+
+            minWidthField.centerYAnchor.constraint(equalTo: minWidthLabel.centerYAnchor),
+            minWidthField.leadingAnchor.constraint(equalTo: minWidthLabel.trailingAnchor, constant: 6),
+            minWidthField.widthAnchor.constraint(equalToConstant: 60),
+            minWidthField.heightAnchor.constraint(equalToConstant: 22),
+
+            minSizeX.centerYAnchor.constraint(equalTo: minWidthLabel.centerYAnchor),
+            minSizeX.leadingAnchor.constraint(equalTo: minWidthField.trailingAnchor, constant: 4),
+
+            minHeightField.centerYAnchor.constraint(equalTo: minWidthLabel.centerYAnchor),
+            minHeightField.leadingAnchor.constraint(equalTo: minSizeX.trailingAnchor, constant: 4),
+            minHeightField.widthAnchor.constraint(equalToConstant: 60),
+            minHeightField.heightAnchor.constraint(equalToConstant: 22),
+
+            maxWidthLabel.centerYAnchor.constraint(equalTo: minWidthLabel.centerYAnchor),
+            maxWidthLabel.leadingAnchor.constraint(equalTo: minHeightField.trailingAnchor, constant: 16),
+            maxWidthLabel.widthAnchor.constraint(equalToConstant: 55),
+
+            maxWidthField.centerYAnchor.constraint(equalTo: minWidthLabel.centerYAnchor),
+            maxWidthField.leadingAnchor.constraint(equalTo: maxWidthLabel.trailingAnchor, constant: 6),
+            maxWidthField.widthAnchor.constraint(equalToConstant: 60),
+            maxWidthField.heightAnchor.constraint(equalToConstant: 22),
+
+            maxSizeX.centerYAnchor.constraint(equalTo: minWidthLabel.centerYAnchor),
+            maxSizeX.leadingAnchor.constraint(equalTo: maxWidthField.trailingAnchor, constant: 4),
+
+            maxHeightField.centerYAnchor.constraint(equalTo: minWidthLabel.centerYAnchor),
+            maxHeightField.leadingAnchor.constraint(equalTo: maxSizeX.trailingAnchor, constant: 4),
+            maxHeightField.widthAnchor.constraint(equalToConstant: 60),
+            maxHeightField.heightAnchor.constraint(equalToConstant: 22),
+
             // Action row
-            stopButton.topAnchor.constraint(equalTo: playModePopup.bottomAnchor, constant: 16),
+            stopButton.topAnchor.constraint(equalTo: filterContainer.bottomAnchor, constant: 16),
             stopButton.leadingAnchor.constraint(equalTo: c.leadingAnchor, constant: m),
 
             retireButton.centerYAnchor.constraint(equalTo: stopButton.centerYAnchor),
             retireButton.leadingAnchor.constraint(equalTo: stopButton.trailingAnchor, constant: 8),
+
+            backButton.centerYAnchor.constraint(equalTo: stopButton.centerYAnchor),
+            backButton.trailingAnchor.constraint(equalTo: nextButton.leadingAnchor, constant: -8),
 
             nextButton.centerYAnchor.constraint(equalTo: stopButton.centerYAnchor),
             nextButton.trailingAnchor.constraint(equalTo: applyButton.leadingAnchor, constant: -8),
@@ -329,9 +527,13 @@ class PreferencesController: NSObject {
         intervalPopup.isHidden = !selectedIsFolder
         playModeLabel.isHidden = !selectedIsFolder
         playModePopup.isHidden = !selectedIsFolder
+        let sequential = (RotationManager.shared.config?.playMode ?? .shuffle) == .sequential
         nextButton.isHidden = !rotating
+        backButton.isHidden = !rotating || !sequential
         retireButton.isHidden = !rotating
         stopButton.isHidden = !rotating
+
+        updateFilterToggleTitle()
 
         applyButton.isEnabled = selectedPath != nil
 
@@ -472,6 +674,11 @@ class PreferencesController: NSObject {
 
     @objc private func nextTapped() {
         RotationManager.shared.applyNext()
+        syncUI()
+    }
+
+    @objc private func backTapped() {
+        RotationManager.shared.applyPrevious()
         syncUI()
     }
 

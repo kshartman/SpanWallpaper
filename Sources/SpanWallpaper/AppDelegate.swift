@@ -3,6 +3,7 @@ import SpanWallpaperLib
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     var prefsController: PreferencesController?
+    private var statusBarController: StatusBarController?
     private var hasProcessed = false
     private var screenChangeDebounce: DispatchWorkItem?
     private var isReapplying = false
@@ -49,9 +50,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
+        let sbc = StatusBarController()
+        sbc.onShowPreferences = { [weak self] in self?.showPreferences() }
+        self.statusBarController = sbc
+
         RotationManager.shared.resume()
         registerDisplayObservers()
-        showPreferences()
+
+        let hasConfig = AppConfig.load() != nil
+        if !hasConfig || !RotationManager.shared.isActive {
+            showPreferences()
+        }
     }
 
     private func handleRotateTick() {
@@ -198,7 +207,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-        return !RotationManager.shared.isActive
+        return false
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -209,48 +218,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         NSApp.activate(ignoringOtherApps: true)
         return true
-    }
-
-    // MARK: - Dock right-click menu
-
-    func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
-        guard RotationManager.shared.isActive else { return nil }
-        let menu = NSMenu()
-
-        let nextItem = NSMenuItem(title: "Next Wallpaper", action: #selector(dockNextWallpaper), keyEquivalent: "")
-        nextItem.target = self
-        menu.addItem(nextItem)
-
-        let retireItem = NSMenuItem(title: "Retire Current", action: #selector(dockRetireCurrent), keyEquivalent: "")
-        retireItem.target = self
-        menu.addItem(retireItem)
-
-        menu.addItem(NSMenuItem.separator())
-
-        let stopItem = NSMenuItem(title: "Stop Rotation", action: #selector(dockStopRotation), keyEquivalent: "")
-        stopItem.target = self
-        menu.addItem(stopItem)
-
-        return menu
-    }
-
-    @objc private func dockNextWallpaper() {
-        RotationManager.shared.applyNext()
-        prefsController?.syncUI()
-    }
-
-    @objc private func dockRetireCurrent() {
-        RotationManager.shared.retireCurrent()
-        prefsController?.syncUI()
-    }
-
-    @objc private func dockStopRotation() {
-        RotationManager.shared.stop()
-        if window == nil {
-            NSApp.terminate(nil)
-        } else {
-            prefsController?.syncUI()
-        }
     }
 
     // MARK: - Window

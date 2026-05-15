@@ -66,7 +66,7 @@ cat > "$BUNDLE/Contents/Info.plist" <<'PLIST_EOF'
     <key>LSMinimumSystemVersion</key>
     <string>11.0</string>
     <key>LSUIElement</key>
-    <false/>
+    <true/>
     <key>CFBundleDocumentTypes</key>
     <array>
         <dict>

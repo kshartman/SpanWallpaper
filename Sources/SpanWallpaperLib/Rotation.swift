@@ -142,3 +142,13 @@ public func pickNextImage(from images: [URL], lastUsed: String?, playMode: PlayM
         return images.randomElement()
     }
 }
+
+public func pickPreviousImage(from images: [URL], lastUsed: String?) -> URL? {
+    guard !images.isEmpty else { return nil }
+    guard let last = lastUsed,
+          let idx = images.firstIndex(where: { $0.path == last }) else {
+        return images.last
+    }
+    let prevIdx = (idx - 1 + images.count) % images.count
+    return images[prevIdx]
+}
