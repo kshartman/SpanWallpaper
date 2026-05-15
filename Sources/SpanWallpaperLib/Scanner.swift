@@ -80,8 +80,11 @@ public func scanImages(in folder: URL, options: ScanOptions) -> [URL] {
         images.append(url)
     }
 
+    let base = folder.standardizedFileURL.path
     return images.sorted {
-        $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending
+        let a = $0.standardizedFileURL.path.dropFirst(base.count)
+        let b = $1.standardizedFileURL.path.dropFirst(base.count)
+        return a.localizedStandardCompare(String(b)) == .orderedAscending
     }
 }
 

@@ -134,7 +134,7 @@ public func pickNextImage(from images: [URL], lastUsed: String?, playMode: PlayM
     case .sequential:
         guard let last = lastUsed,
               let idx = images.firstIndex(where: { $0.path == last }) else {
-            return images.randomElement()
+            return images.first
         }
         let nextIdx = (idx + 1) % images.count
         return images[nextIdx]

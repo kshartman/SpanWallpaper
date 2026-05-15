@@ -159,11 +159,10 @@ final class PickNextTests: XCTestCase {
         XCTAssertEqual(result, list[0])
     }
 
-    func testNoLastUsedReturnsElement() {
+    func testNoLastUsedReturnsFirst() {
         let list = urls("a.jpg", "b.jpg", "c.jpg")
         let result = pickNextImage(from: list, lastUsed: nil)
-        XCTAssertNotNil(result)
-        XCTAssertTrue(list.contains(result!))
+        XCTAssertEqual(result, list[0])
     }
 
     func testSequentialAdvances() {
@@ -190,11 +189,10 @@ final class PickNextTests: XCTestCase {
         XCTAssertEqual(result, list[0])
     }
 
-    func testDeletedLastUsedReturnsRandom() {
+    func testDeletedLastUsedReturnsFirst() {
         let list = urls("a.jpg", "b.jpg")
         let result = pickNextImage(from: list, lastUsed: "/images/gone.jpg")
-        XCTAssertNotNil(result)
-        XCTAssertTrue(list.contains(result!))
+        XCTAssertEqual(result, list[0])
     }
 
     func testDuplicatePathsInList() {

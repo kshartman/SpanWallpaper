@@ -239,6 +239,12 @@ echo "Icon installed."
 # ---------------------------------------------------------------------------
 # 4) Install to /Applications
 # ---------------------------------------------------------------------------
+if pgrep -f "$APP/Contents/MacOS/$APP_NAME" >/dev/null 2>&1; then
+    echo "Quitting running instance..."
+    osascript -e "tell application \"$APP_NAME\" to quit" 2>/dev/null || true
+    sleep 1
+    pkill -f "$APP/Contents/MacOS/$APP_NAME" 2>/dev/null || true
+fi
 if [[ -d "$APP" ]]; then
     echo "Removing old $APP..."
     rm -rf "$APP"

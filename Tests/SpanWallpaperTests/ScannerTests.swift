@@ -105,6 +105,17 @@ final class ScannerTests: XCTestCase {
         XCTAssertEqual(results.map { $0.lastPathComponent }, ["a.jpg", "b.jpg", "c.jpg"])
     }
 
+    func testRecursiveSortByRelativePath() {
+        createFile("beta/photo.jpg")
+        createFile("alpha/photo.jpg")
+        createFile("photo.jpg")
+
+        let results = scanImages(in: tempDir, options: ScanOptions(recursive: true, excludePatterns: []))
+        let base = tempDir.standardizedFileURL.path + "/"
+        let names = results.map { $0.standardizedFileURL.path.replacingOccurrences(of: base, with: "") }
+        XCTAssertEqual(names, ["alpha/photo.jpg", "beta/photo.jpg", "photo.jpg"])
+    }
+
     func testAllImageExtensions() {
         for ext in imageExtensions {
             createFile("test.\(ext)")
