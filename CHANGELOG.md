@@ -1,5 +1,19 @@
 # Changelog
 
+## 2.1.2 — 2026-05-15
+
+Rotation race condition fix.
+
+### Bug fixes
+- **Shuffle + span no longer shows different images per screen**: switching from sequential to shuffle could cause the UI and launchd agent to apply different images simultaneously -- both paths now use cross-process locking
+- **Apply no longer double-fires**: clicking Apply would apply the wallpaper, then the launchd agent's `RunAtLoad` tick would immediately apply a different one -- a skip marker now prevents the redundant tick
+- **Shuffle queue resets on mode change**: switching play mode in the UI now resets the in-memory shuffle queue so the next image comes from a fresh shuffle
+
+### Under the hood
+- `applyNext()` and `applyPrevious()` now wrapped in `WallpaperSetter.withProcessLock` for cross-process serialization
+- `start()` reordered: applies wallpaper before installing the launchd agent (not after)
+- Skip marker (`.skip-next-tick`) written before agent install, consumed by `handleRotateTick()` to suppress the `RunAtLoad` tick
+
 ## 2.1.1 — 2026-05-15
 
 Appearance switcher and UI fix.

@@ -49,6 +49,7 @@ Key components:
 - Config: `~/Library/Application Support/SpanWallpaper/config.json` (auto-migrates from `rotation.json`)
 - Error file: `~/Library/Application Support/SpanWallpaper/last-error.txt` (cross-process error reporting from launchd agent)
 - Process lock: `~/Library/Application Support/SpanWallpaper/.lock` (flock-based)
+- Skip marker: `~/Library/Application Support/SpanWallpaper/.skip-next-tick` (prevents RunAtLoad double-apply)
 - LaunchAgent: `~/Library/LaunchAgents/com.shartman.SpanWallpaper.plist`
 - Logs: stderr (or `/tmp/SpanWallpaper.log` when run via launchd)
 - macOS wallpaper cache: `~/Library/Containers/com.apple.wallpaper.agent/Data/Library/Caches/com.apple.wallpaper.caches/extension-com.apple.wallpaper.extension.image/` (requires FDA)
@@ -61,9 +62,11 @@ Key components:
 - Space changes use **apply-only reapply** (cached slices for Span, re-call NSWorkspace for Fit/Fill). Screen changes and wake trigger **full re-render** via `reapplyCurrent()`.
 - JPEG writes are **atomic** (write to `.tmp`, then rename) to avoid corrupted wallpapers if the process is killed mid-write.
 - Slice filenames use `{8-char-runID}_{displayID}.jpg` pattern. Old slices are cleaned up by regex after each apply.
-- **Cross-process locking** via `flock` prevents the UI process and launchd agent from colliding on shared state files.
+- **Cross-process locking** via `flock` on all wallpaper-apply paths (`applyNext`, `applyPrevious`, `reapplyCurrent`, and the launchd `--rotate` tick) prevents the UI process and launchd agent from interleaving `NSWorkspace.setDesktopImageURL` calls.
 - **Layout fingerprinting** (displayID + frame + scale) skips redundant re-renders when macOS fires screen-change notifications without actual layout changes.
-- **Shuffle state is in-memory only**. Fisher-Yates shuffle queue resets on rescan, retire, or app restart. LaunchD ticks (separate process) degrade to random selection.
+- **Shuffle state is in-memory only**. Fisher-Yates shuffle queue resets on rescan, retire, play mode change, or app restart. LaunchD ticks (separate process) degrade to random selection.
+- **Skip marker** (`.skip-next-tick`): written before installing the launchd agent so the `RunAtLoad` tick exits immediately without double-applying. Consumed (deleted) on read. On reboot, no marker exists, so `RunAtLoad` works normally.
+- **Start order**: `RotationManager.start()` calls `applyNext()` before `installLaunchAgent()` so the first image is applied and `lastImagePath` is persisted before the agent fires.
 - **Config migration**: on first v2 load, if `config.json` is missing but `rotation.json` exists, auto-migrates and deletes the old file.
 - `NSWorkspace.setDesktopImageURL(_:for:options:)` is deprecated in macOS 14+. No replacement API exists yet.
 - **Cache management** requires Full Disk Access (FDA) because the macOS wallpaper cache lives inside `~/Library/Containers/com.apple.wallpaper.agent/`. FDA is checked via `TCC.db` readability probe — no TCC prompt unless the user explicitly interacts with the cache section. Auto-purge only runs from the launchd `--rotate` tick, never during interactive Apply/Next/Back.

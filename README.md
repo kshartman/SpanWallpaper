@@ -68,3 +68,4 @@ JPEG, PNG, HEIC, HEIF, TIFF, BMP, and WebP.
 
 - [Changelog](CHANGELOG.md)
 - [Open issues](TODOS.md)
+- [License (MIT)](LICENSE)
