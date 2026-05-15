@@ -60,6 +60,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func handleRotateTick() {
+        if WallpaperSetter.consumeSkipMarker() { return }
         guard let config = AppConfig.load(), let folderPath = config.folderPath else { return }
         let folder = URL(fileURLWithPath: folderPath)
         guard FileManager.default.isReadableFile(atPath: folder.path) else {

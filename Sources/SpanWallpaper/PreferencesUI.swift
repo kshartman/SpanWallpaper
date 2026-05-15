@@ -896,6 +896,7 @@ class PreferencesController: NSObject, NSTextFieldDelegate {
             RotationManager.shared.config = cfg
             cfg.save()
         }
+        RotationManager.shared.resetShuffle()
         syncUI()
     }
 

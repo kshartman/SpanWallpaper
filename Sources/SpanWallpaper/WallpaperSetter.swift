@@ -146,6 +146,21 @@ enum WallpaperSetter {
         try? String(contentsOf: errorURL, encoding: .utf8)
     }
 
+    // MARK: - Skip marker (prevents RunAtLoad tick after fresh install)
+
+    private static let skipMarkerURL: URL = supportDir.appendingPathComponent(".skip-next-tick")
+
+    static func writeSkipMarker() {
+        try? Data().write(to: skipMarkerURL)
+    }
+
+    static func consumeSkipMarker() -> Bool {
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: skipMarkerURL.path) else { return false }
+        try? fm.removeItem(at: skipMarkerURL)
+        return true
+    }
+
     // MARK: - Cross-process lock
 
     private static let lockURL: URL = supportDir.appendingPathComponent(".lock")

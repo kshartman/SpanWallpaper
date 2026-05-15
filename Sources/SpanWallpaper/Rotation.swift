@@ -106,8 +106,9 @@ class RotationManager {
         config?.save()
 
         resetShuffle()
-        installLaunchAgent()
         applyNext()
+        WallpaperSetter.writeSkipMarker()
+        installLaunchAgent()
         scheduleTimer()
         Log.info("Rotation started: \(folderPath), interval \(config?.intervalSeconds ?? AppConfig.defaultInterval)s")
     }
@@ -159,10 +160,12 @@ class RotationManager {
         }
 
         do {
-            try processImage(at: nextImage.path, displayMode: config.displayMode)
-            lastAppliedImagePath = nextImage.path
-            self.config?.lastImagePath = nextImage.path
-            self.config?.save()
+            try WallpaperSetter.withProcessLock {
+                try processImage(at: nextImage.path, displayMode: config.displayMode)
+                lastAppliedImagePath = nextImage.path
+                self.config?.lastImagePath = nextImage.path
+                self.config?.save()
+            }
         } catch {
             Log.info("Rotation error: \(error)")
         }
@@ -180,10 +183,12 @@ class RotationManager {
         guard let prev = pickPreviousImage(from: images, lastUsed: config.lastImagePath) else { return }
 
         do {
-            try processImage(at: prev.path, displayMode: config.displayMode)
-            lastAppliedImagePath = prev.path
-            self.config?.lastImagePath = prev.path
-            self.config?.save()
+            try WallpaperSetter.withProcessLock {
+                try processImage(at: prev.path, displayMode: config.displayMode)
+                lastAppliedImagePath = prev.path
+                self.config?.lastImagePath = prev.path
+                self.config?.save()
+            }
         } catch {
             Log.info("Previous error: \(error)")
         }
@@ -268,7 +273,7 @@ class RotationManager {
 
     // MARK: - Shuffle
 
-    private func resetShuffle() {
+    func resetShuffle() {
         shuffledQueue = []
         shuffleIndex = 0
     }
