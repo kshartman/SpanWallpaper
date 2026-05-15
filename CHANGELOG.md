@@ -5,14 +5,18 @@
 macOS wallpaper cache management.
 
 ### Features
-- **Cache cleanup button**: "Clear macOS Cache" in preferences — shows cache size and confirms before purging
-- **Auto-purge**: keeps only the 10 most recent cached wallpaper BMPs after each rotation (Next, Back, Retire, launchd tick)
+- **Collapsible Cache section**: manage the macOS wallpaper cache from a dedicated section in preferences (like Filters)
+- **Auto-clear on rotation**: opt-in checkbox keeps only the 10 most recent cached wallpaper BMPs on each launchd rotation tick
+- **Clear Cache Now**: one-click manual purge with size confirmation dialog
+- **Full Disk Access flow**: guided setup prompts you to grant FDA in System Settings when first enabling cache features — one-time setup, no more per-launch permission prompts
 - **Preferences on launch**: double-clicking the app always opens the preferences window
+- **Code signing**: `setup.sh` now signs the app for persistent TCC grants
 
 ### Under the hood
-- `WallpaperCache` module in SpanWallpaperLib with `hasAccess()`, `sizeBytes()`, `formattedSize()`, and `purge(keeping:)`
-- TCC-safe: no file access until user explicitly clicks the cache button (avoids startup prompts)
-- Cache purge runs in RotationManager after interactive actions and in AppDelegate for launchd ticks
+- `WallpaperCache` module in SpanWallpaperLib with `hasFDA()`, `sizeBytes()`, `formattedSize()`, and `purge(keeping:)`
+- FDA check via `TCC.db` readability probe — cache directory is never touched unless FDA is confirmed
+- Auto-purge runs only from launchd `--rotate` ticks (not during interactive Apply/Next/Back) to avoid TCC prompts in the GUI
+- `AppConfig` gains `autoClearCache` and `cacheAccessConfirmed` fields (backward-compatible defaults)
 
 ## 2.0.0 — 2026-05-15
 

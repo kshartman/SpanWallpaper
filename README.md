@@ -1,6 +1,6 @@
 # SpanWallpaper
 
-Sets a single image as the macOS wallpaper, aspect-filled across all attached displays treated as one unified canvas.
+A native macOS wallpaper manager with three display modes: **Span** (one image across all monitors), **Fit** (letterboxed per screen), and **Fill** (cropped per screen). Supports folder-based rotation, image filtering, and wallpaper cache management.
 
 ## Install
 
@@ -8,7 +8,7 @@ Sets a single image as the macOS wallpaper, aspect-filled across all attached di
 ./setup.sh
 ```
 
-Compiles the app, generates an icon, installs to `/Applications/SpanWallpaper.app`, and creates a Desktop alias.
+Compiles the app, generates an icon, code-signs it, installs to `/Applications/SpanWallpaper.app`, and creates a Desktop alias.
 
 ## Usage
 
@@ -18,22 +18,26 @@ Compiles the app, generates an icon, installs to `/Applications/SpanWallpaper.ap
 
 ### Preferences window
 
-Double-click the app (or launch with no arguments) to open the preferences window:
+Double-click the app (or click **Preferences** in the menu bar icon) to open the preferences window:
 
 - **Drop zone** -- drag an image or folder onto it
 - **Choose...** -- browse for an image file or folder
-- **Rotate interval** -- pick from 30 min to 1 week (shown when a folder is selected)
+- **Rotate / Order / Display** -- interval (30 min to 1 week), shuffle or sequential, and Span/Fit/Fill mode
+- **Filters** -- collapsible section for recursive scanning, exclude patterns (glob), and min/max size constraints
+- **Cache** -- collapsible section to manage macOS wallpaper cache; auto-clear on rotation or clear manually (requires Full Disk Access)
 - **Apply** -- apply the current selection
-- **Next** -- advance to the next image immediately (rotation mode)
+- **Next / Back** -- step forward or backward through images (rotation mode)
+- **Retire** -- move current wallpaper to a `retired/` subfolder and advance
 - **Stop Rotation** -- stop rotating and uninstall the schedule
 
 ### Folder rotation
 
-Drop or choose a folder of images to rotate the wallpaper automatically. The app picks a random image first, then cycles in sorted order. A launchd agent is installed so rotation survives reboots.
+Drop or choose a folder of images to rotate the wallpaper automatically. Choose shuffle or sequential play order. A launchd agent is installed so rotation survives reboots.
 
-**Right-click the Dock icon** while rotation is active:
-- **Next Wallpaper** -- advance immediately
-- **Stop Rotation** -- stop and uninstall the schedule
+The app runs as a **menu bar icon** (no Dock icon). Click it to access:
+- **Next / Back / Retire** -- navigate or curate images
+- **Preferences** -- open the full preferences window
+- **Quit** -- stop the app
 
 ## Storage
 

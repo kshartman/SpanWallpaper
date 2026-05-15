@@ -29,9 +29,9 @@ SPM project with a library target (`SpanWallpaperLib`) for testable pure functio
 ## Architecture
 
 SPM package with three targets:
-- `SpanWallpaperLib` (`Sources/SpanWallpaperLib/`) -- pure functions: `AppConfig`/`RotationConfig` (Codable), `PlayMode`, `DisplayMode`, `pickNextImage`, `ScanOptions`, `scanImages`, `imageDimensions`, `matchesExcludePattern`, `IntervalPreset`, `SliceFileMatch`, `imageExtensions`. No AppKit dependency.
+- `SpanWallpaperLib` (`Sources/SpanWallpaperLib/`) -- pure functions: `AppConfig`/`RotationConfig` (Codable), `PlayMode`, `DisplayMode`, `pickNextImage`, `ScanOptions`, `scanImages`, `imageDimensions`, `matchesExcludePattern`, `IntervalPreset`, `SliceFileMatch`, `imageExtensions`, `WallpaperCache` (FDA check, cache size, purge). No AppKit dependency.
 - `SpanWallpaper` (`Sources/SpanWallpaper/`) -- the app, split into 8 files: `main.swift` (entry point), `AppDelegate.swift`, `ScreenLayout.swift`, `ImagePipeline.swift`, `WallpaperSetter.swift`, `Rotation.swift`, `PreferencesUI.swift`, `Utilities.swift`.
-- `SpanWallpaperTests` (`Tests/SpanWallpaperTests/`) -- XCTest suite for the lib (51 tests).
+- `SpanWallpaperTests` (`Tests/SpanWallpaperTests/`) -- XCTest suite for the lib (59 tests).
 
 Key components:
 
@@ -40,7 +40,7 @@ Key components:
 - **WallpaperSetter** -- applies slice files (Span) or original images (Fit/Fill) via `NSWorkspace.setDesktopImageURL`. Caches displayID-to-file mapping for fast Space-change reapply. Manages slice cleanup and cross-process locking.
 - **RotationManager** -- manages folder rotation with shuffle (Fisher-Yates in-memory queue) or sequential play. Persists state to `config.json`, installs/uninstalls a launchd agent for reboot persistence. Handles retire workflow (move image to `retired/` subfolder).
 - **Scanner** (lib) -- configurable image scanner with recursive traversal, fnmatch-based exclusion patterns, and optional size filtering via `CGImageSourceCopyPropertiesAtIndex`.
-- **PreferencesController** -- AppKit UI with drop zone, file picker, interval/play-mode/display-mode selectors, retire/next/stop buttons. Built programmatically (no XIB/storyboard).
+- **PreferencesController** -- AppKit UI with drop zone, file picker, interval/play-mode/display-mode selectors, collapsible filter and cache sections, retire/next/stop buttons. Cache section requires FDA (Full Disk Access) to manage the macOS wallpaper cache. Built programmatically (no XIB/storyboard).
 - **AppDelegate** -- entry point routing: `--rotate` flag = one-shot for launchd, CLI args = direct apply, no args = show preferences. Registers observers for screen changes, wake, and Space switches to auto-reapply. Handles window reopen on dock icon click.
 
 ## Runtime Paths
@@ -51,6 +51,7 @@ Key components:
 - Process lock: `~/Library/Application Support/SpanWallpaper/.lock` (flock-based)
 - LaunchAgent: `~/Library/LaunchAgents/com.shartman.SpanWallpaper.plist`
 - Logs: stderr (or `/tmp/SpanWallpaper.log` when run via launchd)
+- macOS wallpaper cache: `~/Library/Containers/com.apple.wallpaper.agent/Data/Library/Caches/com.apple.wallpaper.caches/extension-com.apple.wallpaper.extension.image/` (requires FDA)
 
 ## Key Design Decisions
 
@@ -65,6 +66,8 @@ Key components:
 - **Shuffle state is in-memory only**. Fisher-Yates shuffle queue resets on rescan, retire, or app restart. LaunchD ticks (separate process) degrade to random selection.
 - **Config migration**: on first v2 load, if `config.json` is missing but `rotation.json` exists, auto-migrates and deletes the old file.
 - `NSWorkspace.setDesktopImageURL(_:for:options:)` is deprecated in macOS 14+. No replacement API exists yet.
+- **Cache management** requires Full Disk Access (FDA) because the macOS wallpaper cache lives inside `~/Library/Containers/com.apple.wallpaper.agent/`. FDA is checked via `TCC.db` readability probe — no TCC prompt unless the user explicitly interacts with the cache section. Auto-purge only runs from the launchd `--rotate` tick, never during interactive Apply/Next/Back.
+- **Code signing** (`setup.sh`) uses the first available signing identity for persistent TCC grants. Self-signed certs require manual FDA setup; Apple Developer certs auto-appear in the FDA list.
 
 ## Skill routing
 
