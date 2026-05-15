@@ -13,6 +13,10 @@ final class FileCleanupTests: XCTestCase {
             filename: ".550e8400-e29b-41d4-a716-446655440000.tmp", keeping: []))
     }
 
+    func testPreservesConfigJson() {
+        XCTAssertFalse(SliceFileMatch.shouldClean(filename: "config.json", keeping: []))
+    }
+
     func testPreservesRotationJson() {
         XCTAssertFalse(SliceFileMatch.shouldClean(filename: "rotation.json", keeping: []))
     }

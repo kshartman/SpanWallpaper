@@ -15,7 +15,7 @@ public enum SliceFileMatch {
     }
 
     public static func shouldClean(filename: String, keeping: Set<String>) -> Bool {
-        let preserve = keeping.union(["rotation.json", "last-error.txt", ".lock"])
+        let preserve = keeping.union(["config.json", "rotation.json", "last-error.txt", ".lock"])
         if preserve.contains(filename) { return false }
         return isSliceFile(filename) || isTempFile(filename)
     }

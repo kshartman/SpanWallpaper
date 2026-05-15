@@ -15,7 +15,7 @@ enum WallpaperSetter {
         return dir
     }()
 
-    static let configURL: URL = supportDir.appendingPathComponent("rotation.json")
+    static let configURL: URL = supportDir.appendingPathComponent("config.json")
     static let errorURL: URL = supportDir.appendingPathComponent("last-error.txt")
 
     private static let queue = DispatchQueue(label: "com.shartman.SpanWallpaper.sliceFiles")
@@ -24,6 +24,8 @@ enum WallpaperSetter {
     static var lastSliceFiles: [CGDirectDisplayID: URL] {
         queue.sync { _lastSliceFiles }
     }
+
+    // MARK: - Span mode apply
 
     static func apply(sliceFiles: [(slice: ScreenSlice, url: URL)]) {
         var mapping: [CGDirectDisplayID: URL] = [:]
@@ -73,7 +75,54 @@ enum WallpaperSetter {
         }
     }
 
-    private static func cleanupOldFiles(keeping keep: Set<String>) {
+    // MARK: - Fit/Fill mode apply
+
+    static func applyOriginalToAllScreens(imageURL: URL, mode: DisplayMode) {
+        let scaling: NSImageScaling
+        let clip: Bool
+        switch mode {
+        case .fit:
+            scaling = .scaleProportionallyUpOrDown
+            clip = false
+        case .fill:
+            scaling = .scaleProportionallyUpOrDown
+            clip = true
+        case .span:
+            return
+        }
+
+        let options: [NSWorkspace.DesktopImageOptionKey: Any] = [
+            .imageScaling: NSNumber(value: scaling.rawValue),
+            .allowClipping: NSNumber(value: clip)
+        ]
+
+        let applyBlock = {
+            for screen in NSScreen.screens {
+                let did = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID ?? 0
+                Log.info("  apply \(mode.rawValue) displayID=\(did) -> \(imageURL.lastPathComponent)")
+                do {
+                    try NSWorkspace.shared.setDesktopImageURL(imageURL, for: screen, options: options)
+                } catch {
+                    Log.info("  FAILED displayID=\(did): \(error.localizedDescription)")
+                }
+            }
+        }
+
+        if Thread.isMainThread {
+            applyBlock()
+        } else {
+            DispatchQueue.main.async { applyBlock() }
+        }
+    }
+
+    // MARK: - Slice cache management
+
+    static func clearSliceCache() {
+        queue.sync { _lastSliceFiles = [:] }
+        cleanupOldFiles(keeping: [])
+    }
+
+    static func cleanupOldFiles(keeping keep: Set<String>) {
         let fm = FileManager.default
         guard let items = try? fm.contentsOfDirectory(at: supportDir, includingPropertiesForKeys: nil) else { return }
         for url in items {

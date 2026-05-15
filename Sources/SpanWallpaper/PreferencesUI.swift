@@ -86,8 +86,13 @@ class PreferencesController: NSObject {
     private let browseButton = NSButton(title: "Choose...", target: nil, action: nil)
     private let intervalPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let intervalLabel = NSTextField(labelWithString: "Rotate:")
+    private let playModePopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let playModeLabel = NSTextField(labelWithString: "Order:")
+    private let displayModePopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let displayModeLabel = NSTextField(labelWithString: "Display:")
     private let applyButton = NSButton(title: "Apply", target: nil, action: nil)
     private let nextButton = NSButton(title: "Next", target: nil, action: nil)
+    private let retireButton = NSButton(title: "Retire", target: nil, action: nil)
     private let stopButton = NSButton(title: "Stop Rotation", target: nil, action: nil)
     private let statusLabel = NSTextField(labelWithString: "")
     private let separator = NSBox()
@@ -97,7 +102,7 @@ class PreferencesController: NSObject {
 
     override init() {
         window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 440, height: 340),
+            contentRect: NSRect(x: 0, y: 0, width: 440, height: 390),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
@@ -113,7 +118,9 @@ class PreferencesController: NSObject {
         content.wantsLayer = true
 
         for v: NSView in [dropZone, pathLabel, browseButton, intervalLabel,
-                          intervalPopup, applyButton, nextButton, stopButton,
+                          intervalPopup, playModeLabel, playModePopup,
+                          displayModeLabel, displayModePopup,
+                          applyButton, nextButton, retireButton, stopButton,
                           statusLabel, separator] {
             v.translatesAutoresizingMaskIntoConstraints = false
             content.addSubview(v)
@@ -123,6 +130,7 @@ class PreferencesController: NSObject {
         setupPathRow()
         setupSeparator()
         setupIntervalRow()
+        setupDisplayRow()
         setupActionRow()
         setupStatusRow()
         layoutConstraints()
@@ -158,9 +166,37 @@ class PreferencesController: NSObject {
         for preset in IntervalPreset.all {
             intervalPopup.addItem(withTitle: preset.title)
         }
-        intervalPopup.selectItem(at: IntervalPreset.indexForSeconds(
-            RotationManager.shared.config?.intervalSeconds ?? RotationConfig.defaultInterval
-        ))
+        let savedInterval = RotationManager.shared.config?.intervalSeconds ?? AppConfig.defaultInterval
+        intervalPopup.selectItem(at: IntervalPreset.indexForSeconds(savedInterval))
+
+        playModeLabel.textColor = NSColor(white: 0.6, alpha: 1)
+        playModeLabel.font = NSFont.systemFont(ofSize: 13)
+
+        playModePopup.removeAllItems()
+        playModePopup.addItem(withTitle: "Shuffle")
+        playModePopup.addItem(withTitle: "Sequential")
+        let savedMode = RotationManager.shared.config?.playMode ?? .shuffle
+        playModePopup.selectItem(at: savedMode == .shuffle ? 0 : 1)
+        playModePopup.target = self
+        playModePopup.action = #selector(playModeChanged)
+    }
+
+    private func setupDisplayRow() {
+        displayModeLabel.textColor = NSColor(white: 0.6, alpha: 1)
+        displayModeLabel.font = NSFont.systemFont(ofSize: 13)
+
+        displayModePopup.removeAllItems()
+        displayModePopup.addItem(withTitle: "Span (all monitors)")
+        displayModePopup.addItem(withTitle: "Fit (letterbox)")
+        displayModePopup.addItem(withTitle: "Fill (crop)")
+        let savedDisplay = RotationManager.shared.config?.displayMode ?? .span
+        switch savedDisplay {
+        case .span: displayModePopup.selectItem(at: 0)
+        case .fit: displayModePopup.selectItem(at: 1)
+        case .fill: displayModePopup.selectItem(at: 2)
+        }
+        displayModePopup.target = self
+        displayModePopup.action = #selector(displayModeChanged)
     }
 
     private func setupActionRow() {
@@ -172,6 +208,11 @@ class PreferencesController: NSObject {
         nextButton.target = self
         nextButton.action = #selector(nextTapped)
         nextButton.bezelStyle = .rounded
+
+        retireButton.target = self
+        retireButton.action = #selector(retireTapped)
+        retireButton.bezelStyle = .rounded
+        retireButton.contentTintColor = .systemOrange
 
         stopButton.target = self
         stopButton.action = #selector(stopTapped)
@@ -208,6 +249,7 @@ class PreferencesController: NSObject {
             separator.leadingAnchor.constraint(equalTo: c.leadingAnchor, constant: m),
             separator.trailingAnchor.constraint(equalTo: c.trailingAnchor, constant: -m),
 
+            // Interval row
             intervalLabel.topAnchor.constraint(equalTo: separator.bottomAnchor, constant: 14),
             intervalLabel.leadingAnchor.constraint(equalTo: c.leadingAnchor, constant: m),
             intervalLabel.widthAnchor.constraint(equalToConstant: 52),
@@ -216,8 +258,29 @@ class PreferencesController: NSObject {
             intervalPopup.leadingAnchor.constraint(equalTo: intervalLabel.trailingAnchor, constant: 6),
             intervalPopup.trailingAnchor.constraint(equalTo: c.trailingAnchor, constant: -m),
 
-            stopButton.topAnchor.constraint(equalTo: intervalPopup.bottomAnchor, constant: 16),
+            // Play mode row
+            playModeLabel.topAnchor.constraint(equalTo: intervalPopup.bottomAnchor, constant: 10),
+            playModeLabel.leadingAnchor.constraint(equalTo: c.leadingAnchor, constant: m),
+            playModeLabel.widthAnchor.constraint(equalToConstant: 52),
+
+            playModePopup.centerYAnchor.constraint(equalTo: playModeLabel.centerYAnchor),
+            playModePopup.leadingAnchor.constraint(equalTo: playModeLabel.trailingAnchor, constant: 6),
+            playModePopup.widthAnchor.constraint(equalToConstant: 130),
+
+            // Display mode (same row as play mode)
+            displayModeLabel.centerYAnchor.constraint(equalTo: playModeLabel.centerYAnchor),
+            displayModeLabel.leadingAnchor.constraint(equalTo: playModePopup.trailingAnchor, constant: 12),
+
+            displayModePopup.centerYAnchor.constraint(equalTo: displayModeLabel.centerYAnchor),
+            displayModePopup.leadingAnchor.constraint(equalTo: displayModeLabel.trailingAnchor, constant: 6),
+            displayModePopup.trailingAnchor.constraint(equalTo: c.trailingAnchor, constant: -m),
+
+            // Action row
+            stopButton.topAnchor.constraint(equalTo: playModePopup.bottomAnchor, constant: 16),
             stopButton.leadingAnchor.constraint(equalTo: c.leadingAnchor, constant: m),
+
+            retireButton.centerYAnchor.constraint(equalTo: stopButton.centerYAnchor),
+            retireButton.leadingAnchor.constraint(equalTo: stopButton.trailingAnchor, constant: 8),
 
             nextButton.centerYAnchor.constraint(equalTo: stopButton.centerYAnchor),
             nextButton.trailingAnchor.constraint(equalTo: applyButton.leadingAnchor, constant: -8),
@@ -226,6 +289,7 @@ class PreferencesController: NSObject {
             applyButton.trailingAnchor.constraint(equalTo: c.trailingAnchor, constant: -m),
             applyButton.widthAnchor.constraint(equalToConstant: 80),
 
+            // Status row
             statusLabel.topAnchor.constraint(equalTo: stopButton.bottomAnchor, constant: 12),
             statusLabel.leadingAnchor.constraint(equalTo: c.leadingAnchor, constant: m),
             statusLabel.trailingAnchor.constraint(equalTo: c.trailingAnchor, constant: -m),
@@ -237,10 +301,19 @@ class PreferencesController: NSObject {
         let rm = RotationManager.shared
         let rotating = rm.isActive
 
-        if rotating, let cfg = rm.config {
-            selectedPath = cfg.folderPath
+        if rotating, let cfg = rm.config, let folderPath = cfg.folderPath {
+            selectedPath = folderPath
             selectedIsFolder = true
             intervalPopup.selectItem(at: IntervalPreset.indexForSeconds(cfg.intervalSeconds))
+            playModePopup.selectItem(at: cfg.playMode == .shuffle ? 0 : 1)
+        }
+
+        if let cfg = rm.config {
+            switch cfg.displayMode {
+            case .span: displayModePopup.selectItem(at: 0)
+            case .fit: displayModePopup.selectItem(at: 1)
+            case .fill: displayModePopup.selectItem(at: 2)
+            }
         }
 
         if let path = selectedPath {
@@ -254,21 +327,26 @@ class PreferencesController: NSObject {
 
         intervalLabel.isHidden = !selectedIsFolder
         intervalPopup.isHidden = !selectedIsFolder
+        playModeLabel.isHidden = !selectedIsFolder
+        playModePopup.isHidden = !selectedIsFolder
         nextButton.isHidden = !rotating
+        retireButton.isHidden = !rotating
         stopButton.isHidden = !rotating
 
         applyButton.isEnabled = selectedPath != nil
 
-        if rotating {
+        if rotating, let cfg = rm.config, let folderPath = cfg.folderPath {
             if let errMsg = WallpaperSetter.readError() {
                 statusLabel.stringValue = "Last rotation error: \(errMsg)"
                 statusLabel.textColor = .systemRed
             } else {
-                let images = imageFiles(in: URL(fileURLWithPath: rm.config!.folderPath))
+                let options = ScanOptions(from: cfg)
+                let images = imageFiles(in: URL(fileURLWithPath: folderPath), options: options)
                 let presetTitle = IntervalPreset.all[
-                    IntervalPreset.indexForSeconds(rm.config!.intervalSeconds)
+                    IntervalPreset.indexForSeconds(cfg.intervalSeconds)
                 ].title.lowercased()
-                statusLabel.stringValue = "Rotating \(images.count) images, \(presetTitle)"
+                let modeName = cfg.playMode == .shuffle ? "shuffle" : "sequential"
+                statusLabel.stringValue = "Rotating \(images.count) images, \(presetTitle), \(modeName)"
                 statusLabel.textColor = NSColor(red: 0.4, green: 0.8, blue: 0.5, alpha: 0.9)
             }
         } else {
@@ -281,15 +359,21 @@ class PreferencesController: NSObject {
         FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir)
 
         if isDir.boolValue {
-            let images = imageFiles(in: url)
+            let options = ScanOptions(from: RotationManager.shared.config ?? AppConfig())
+            let images = scanImages(in: url, options: options)
             guard !images.isEmpty else {
                 showError("No image files found in \(url.lastPathComponent).")
                 return
             }
             selectedPath = url.path
             selectedIsFolder = true
+            let idx = intervalPopup.indexOfSelectedItem
+            let seconds = IntervalPreset.all[idx].seconds
+            RotationManager.shared.start(folderPath: url.path, intervalSeconds: seconds,
+                                         displayMode: selectedDisplayMode(), playMode: selectedPlayMode())
             syncUI()
         } else if imageExtensions.contains(url.pathExtension.lowercased()) {
+            RotationManager.shared.stop()
             selectedPath = url.path
             selectedIsFolder = false
             syncUI()
@@ -301,20 +385,28 @@ class PreferencesController: NSObject {
         guard let path = selectedPath else { return }
 
         if selectedIsFolder {
-            let images = imageFiles(in: URL(fileURLWithPath: path))
+            let options = ScanOptions(from: RotationManager.shared.config ?? AppConfig())
+            let images = scanImages(in: URL(fileURLWithPath: path), options: options)
             guard !images.isEmpty else {
                 showError("No image files in folder.")
                 return
             }
             let idx = intervalPopup.indexOfSelectedItem
             let seconds = IntervalPreset.all[idx].seconds
-            RotationManager.shared.start(folderPath: path, intervalSeconds: seconds)
+            RotationManager.shared.start(folderPath: path, intervalSeconds: seconds,
+                                         displayMode: selectedDisplayMode(), playMode: selectedPlayMode())
             syncUI()
         } else {
             RotationManager.shared.stop()
+            let displayMode = selectedDisplayMode()
             DispatchQueue.global(qos: .userInitiated).async {
                 do {
-                    try processImage(at: path)
+                    try processImage(at: path, displayMode: displayMode)
+                    var cfg = RotationManager.shared.config ?? AppConfig.load() ?? AppConfig()
+                    cfg.singleImagePath = path
+                    cfg.folderPath = nil
+                    cfg.save()
+                    RotationManager.shared.config = cfg
                     DispatchQueue.main.async { [weak self] in
                         self?.statusLabel.stringValue = "Applied."
                         self?.statusLabel.textColor = NSColor(white: 0.5, alpha: 1)
@@ -324,6 +416,41 @@ class PreferencesController: NSObject {
                 }
             }
             syncUI()
+        }
+    }
+
+    private func selectedDisplayMode() -> DisplayMode {
+        switch displayModePopup.indexOfSelectedItem {
+        case 1: return .fit
+        case 2: return .fill
+        default: return .span
+        }
+    }
+
+    private func selectedPlayMode() -> PlayMode {
+        return playModePopup.indexOfSelectedItem == 0 ? .shuffle : .sequential
+    }
+
+    @objc private func playModeChanged() {
+        if var cfg = RotationManager.shared.config {
+            cfg.playMode = selectedPlayMode()
+            RotationManager.shared.config = cfg
+            cfg.save()
+        }
+        syncUI()
+    }
+
+    @objc private func displayModeChanged() {
+        let mode = selectedDisplayMode()
+        if var cfg = RotationManager.shared.config {
+            cfg.displayMode = mode
+            RotationManager.shared.config = cfg
+            cfg.save()
+        }
+        if RotationManager.shared.lastAppliedImagePath != nil {
+            DispatchQueue.global(qos: .userInitiated).async {
+                RotationManager.shared.reapplyCurrent()
+            }
         }
     }
 
@@ -345,6 +472,11 @@ class PreferencesController: NSObject {
 
     @objc private func nextTapped() {
         RotationManager.shared.applyNext()
+        syncUI()
+    }
+
+    @objc private func retireTapped() {
+        RotationManager.shared.retireCurrent()
         syncUI()
     }
 

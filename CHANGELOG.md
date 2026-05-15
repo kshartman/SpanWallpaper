@@ -1,5 +1,32 @@
 # Changelog
 
+## 2.0.0 — 2026-05-14
+
+Engine refactor and feature expansion.
+
+### Features
+- **Display modes**: Span (all monitors), Fit (letterbox), Fill (crop per screen)
+- **Shuffle/Sequential**: choose play order for folder rotation
+- **Retire button**: move current wallpaper to a `retired/` subfolder and advance
+- **Recursive scanning**: finds images in subdirectories (default on)
+- **Exclude patterns**: skip folders/files matching glob patterns (`retired` excluded by default)
+- **Size filtering**: optional min/max width and height constraints
+- **Unified config**: all settings persist in `config.json` (auto-migrates from `rotation.json`)
+- **Single image tracking**: reapplies last single image on relaunch
+
+### Bug fixes
+- Clicking the app icon now reopens the preferences window when the app is already running
+- Dropping an image during active rotation now stops rotation and applies immediately
+- Dropping a folder now starts rotation immediately (no manual Apply needed)
+
+### Under the hood
+- New `Scanner.swift` in SpanWallpaperLib with configurable recursive scanning, exclusion patterns, and size filtering
+- `AppConfig` replaces `RotationConfig` with automatic migration
+- Fisher-Yates shuffle with in-memory queue (degrades to random for launchd ticks)
+- Fit/Fill modes bypass the slice pipeline entirely — pass original image to NSWorkspace
+- Dock menu gains Retire Current option
+- 51 unit tests (up from 25) covering config, scanner, shuffle, migration, and exclusion patterns
+
 ## 1.0.0 — 2026-05-13
 
 Initial release.

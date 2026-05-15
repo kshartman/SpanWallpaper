@@ -117,44 +117,52 @@ enum ImagePipeline {
     }
 }
 
-func processImage(at path: String) throws {
+func processImage(at path: String, displayMode: DisplayMode = .span) throws {
     let inputURL = URL(fileURLWithPath: (path as NSString).expandingTildeInPath).standardizedFileURL
 
     guard FileManager.default.fileExists(atPath: inputURL.path) else {
         throw WallpaperError.imageLoadFailed(inputURL)
     }
 
-    let layout = try ScreenLayout.detect()
-    Log.info("Screens: \(layout.slices.count) -- canvas \(Int(layout.canvasPointSize.width))x\(Int(layout.canvasPointSize.height))pt")
-    for s in layout.slices {
-        Log.info("  screen[\(s.index)] pt=(\(Int(s.pointOrigin.x)),\(Int(s.pointOrigin.y))) \(Int(s.pointSize.width))x\(Int(s.pointSize.height))pt -> \(Int(s.pixelSize.width))x\(Int(s.pixelSize.height))px @\(s.scaleFactor)x")
+    switch displayMode {
+    case .span:
+        let layout = try ScreenLayout.detect()
+        Log.info("Screens: \(layout.slices.count) -- canvas \(Int(layout.canvasPointSize.width))x\(Int(layout.canvasPointSize.height))pt")
+        for s in layout.slices {
+            Log.info("  screen[\(s.index)] pt=(\(Int(s.pointOrigin.x)),\(Int(s.pointOrigin.y))) \(Int(s.pointSize.width))x\(Int(s.pointSize.height))pt -> \(Int(s.pixelSize.width))x\(Int(s.pixelSize.height))px @\(s.scaleFactor)x")
+        }
+
+        let source = try ImagePipeline.loadCGImage(from: inputURL)
+        let sourceSize = CGSize(width: source.width, height: source.height)
+        Log.info("Source: \(Int(sourceSize.width))x\(Int(sourceSize.height))px")
+
+        let fillRect = ImageMath.sourceFillRect(sourceSize: sourceSize, canvas: layout.canvasPointSize)
+        Log.info("Source crop rect: \(Int(fillRect.origin.x)),\(Int(fillRect.origin.y)) \(Int(fillRect.width))x\(Int(fillRect.height))")
+
+        let runID = UUID().uuidString.prefix(8)
+        var sliceFiles: [(slice: ScreenSlice, url: URL)] = []
+        sliceFiles.reserveCapacity(layout.slices.count)
+
+        for slice in layout.slices {
+            let rendered = try ImagePipeline.renderSlice(
+                source: source,
+                sourceFillRect: fillRect,
+                canvasPoints: layout.canvasPointSize,
+                slice: slice
+            )
+            let filename = "\(runID)_\(slice.displayID).jpg"
+            let fileURL = WallpaperSetter.supportDir.appendingPathComponent(filename)
+            try ImagePipeline.writeJPEG(rendered, to: fileURL)
+            sliceFiles.append((slice: slice, url: fileURL))
+        }
+
+        WallpaperSetter.apply(sliceFiles: sliceFiles)
+
+    case .fit, .fill:
+        WallpaperSetter.clearSliceCache()
+        WallpaperSetter.applyOriginalToAllScreens(imageURL: inputURL, mode: displayMode)
     }
 
-    let source = try ImagePipeline.loadCGImage(from: inputURL)
-    let sourceSize = CGSize(width: source.width, height: source.height)
-    Log.info("Source: \(Int(sourceSize.width))x\(Int(sourceSize.height))px")
-
-    let fillRect = ImageMath.sourceFillRect(sourceSize: sourceSize, canvas: layout.canvasPointSize)
-    Log.info("Source crop rect: \(Int(fillRect.origin.x)),\(Int(fillRect.origin.y)) \(Int(fillRect.width))x\(Int(fillRect.height))")
-
-    let runID = UUID().uuidString.prefix(8)
-    var sliceFiles: [(slice: ScreenSlice, url: URL)] = []
-    sliceFiles.reserveCapacity(layout.slices.count)
-
-    for slice in layout.slices {
-        let rendered = try ImagePipeline.renderSlice(
-            source: source,
-            sourceFillRect: fillRect,
-            canvasPoints: layout.canvasPointSize,
-            slice: slice
-        )
-        let filename = "\(runID)_\(slice.displayID).jpg"
-        let fileURL = WallpaperSetter.supportDir.appendingPathComponent(filename)
-        try ImagePipeline.writeJPEG(rendered, to: fileURL)
-        sliceFiles.append((slice: slice, url: fileURL))
-    }
-
-    WallpaperSetter.apply(sliceFiles: sliceFiles)
     RotationManager.shared.lastAppliedImagePath = path
-    Log.info("Applied wallpaper across \(layout.slices.count) display(s).")
+    Log.info("Applied wallpaper (\(displayMode.rawValue)) across display(s).")
 }

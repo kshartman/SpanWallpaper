@@ -28,14 +28,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         if !filePaths.isEmpty {
             hasProcessed = true
+            let displayMode = AppConfig.load()?.displayMode ?? .span
             for path in filePaths {
                 var isDir: ObjCBool = false
                 FileManager.default.fileExists(atPath: path, isDirectory: &isDir)
                 if isDir.boolValue {
                     RotationManager.shared.start(folderPath: path)
                 } else {
-                    do { try processImage(at: path) }
-                    catch { Log.info("ERROR: \(error)") }
+                    RotationManager.shared.stop()
+                    do {
+                        try processImage(at: path, displayMode: displayMode)
+                    } catch {
+                        Log.info("ERROR: \(error)")
+                    }
                 }
             }
             if !RotationManager.shared.isActive {
@@ -50,18 +55,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func handleRotateTick() {
-        guard let config = RotationConfig.load() else { return }
-        let folder = URL(fileURLWithPath: config.folderPath)
+        guard let config = AppConfig.load(), let folderPath = config.folderPath else { return }
+        let folder = URL(fileURLWithPath: folderPath)
         guard FileManager.default.isReadableFile(atPath: folder.path) else {
-            Log.info("Folder unavailable (ejected/missing?): \(config.folderPath) -- skipping tick")
+            Log.info("Folder unavailable: \(folderPath) -- skipping tick")
             return
         }
         FolderImageCache.shared.invalidate()
-        let images = imageFiles(in: folder)
-        guard let next = pickNextImage(from: images, lastUsed: config.lastImagePath) else { return }
+        let options = ScanOptions(from: config)
+        let images = imageFiles(in: folder, options: options)
+        guard let next = pickNextImage(from: images, lastUsed: config.lastImagePath, playMode: config.playMode) else { return }
         do {
             try WallpaperSetter.withProcessLock {
-                try processImage(at: next.path)
+                try processImage(at: next.path, displayMode: config.displayMode)
                 var updated = config
                 updated.lastImagePath = next.path
                 updated.save()
@@ -101,9 +107,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func activeSpaceChanged(_ note: Notification) {
         spaceChangeDebounce?.cancel()
         let work = DispatchWorkItem {
-            guard RotationManager.shared.lastAppliedImagePath != nil else { return }
-            Log.info("Space changed -- apply-only reapply")
-            WallpaperSetter.reapplyLastSlices()
+            let hasApplied = RotationManager.shared.lastAppliedImagePath != nil
+            let hasSavedImage = RotationManager.shared.config?.lastImagePath != nil
+                || RotationManager.shared.config?.singleImagePath != nil
+            guard hasApplied || hasSavedImage else { return }
+
+            if !WallpaperSetter.lastSliceFiles.isEmpty {
+                Log.info("Space changed -- apply-only reapply")
+                WallpaperSetter.reapplyLastSlices()
+            } else {
+                Log.info("Space changed -- full reapply")
+                RotationManager.shared.reapplyCurrent()
+            }
         }
         spaceChangeDebounce = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: work)
@@ -155,6 +170,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func application(_ sender: NSApplication, openFiles filenames: [String]) {
         hasProcessed = true
+        let displayMode = RotationManager.shared.config?.displayMode ?? .span
         for path in filenames {
             var isDir: ObjCBool = false
             FileManager.default.fileExists(atPath: path, isDirectory: &isDir)
@@ -162,8 +178,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 RotationManager.shared.start(folderPath: path)
                 prefsController?.syncUI()
             } else {
+                RotationManager.shared.stop()
                 do {
-                    try processImage(at: path)
+                    try processImage(at: path, displayMode: displayMode)
                 } catch {
                     if window != nil {
                         showError(error.localizedDescription)
@@ -184,6 +201,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         return !RotationManager.shared.isActive
     }
 
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if flag {
+            window?.makeKeyAndOrderFront(nil)
+        } else {
+            showPreferences()
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        return true
+    }
+
     // MARK: - Dock right-click menu
 
     func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
@@ -193,6 +220,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let nextItem = NSMenuItem(title: "Next Wallpaper", action: #selector(dockNextWallpaper), keyEquivalent: "")
         nextItem.target = self
         menu.addItem(nextItem)
+
+        let retireItem = NSMenuItem(title: "Retire Current", action: #selector(dockRetireCurrent), keyEquivalent: "")
+        retireItem.target = self
+        menu.addItem(retireItem)
 
         menu.addItem(NSMenuItem.separator())
 
@@ -205,6 +236,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func dockNextWallpaper() {
         RotationManager.shared.applyNext()
+        prefsController?.syncUI()
+    }
+
+    @objc private func dockRetireCurrent() {
+        RotationManager.shared.retireCurrent()
         prefsController?.syncUI()
     }
 

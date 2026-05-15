@@ -1,54 +1,58 @@
 import Foundation
 import SpanWallpaperLib
 
-func scanImageFiles(in folderURL: URL) -> [URL] {
-    let fm = FileManager.default
-    guard let enumerator = fm.enumerator(
-        at: folderURL,
-        includingPropertiesForKeys: [.isRegularFileKey],
-        options: [.skipsHiddenFiles, .skipsSubdirectoryDescendants]
-    ) else { return [] }
-
-    var images: [URL] = []
-    for case let url as URL in enumerator {
-        if imageExtensions.contains(url.pathExtension.lowercased()) {
-            images.append(url)
-        }
-    }
-    return images.sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
-}
+// MARK: - Folder Image Cache
 
 final class FolderImageCache {
     static let shared = FolderImageCache()
     private var cachedPath: String?
+    private var cachedOptions: ScanOptions?
     private var cachedFiles: [URL] = []
 
-    func imageFiles(in folderURL: URL) -> [URL] {
+    func imageFiles(in folderURL: URL, options: ScanOptions) -> [URL] {
         let path = folderURL.path
-        if path == cachedPath { return cachedFiles }
-        cachedFiles = scanImageFiles(in: folderURL)
+        if path == cachedPath && options == cachedOptions { return cachedFiles }
+        cachedFiles = scanImages(in: folderURL, options: options)
         cachedPath = path
+        cachedOptions = options
         return cachedFiles
     }
 
     func invalidate() {
         cachedPath = nil
+        cachedOptions = nil
         cachedFiles = []
     }
 }
 
-func imageFiles(in folderURL: URL) -> [URL] {
-    FolderImageCache.shared.imageFiles(in: folderURL)
+func imageFiles(in folderURL: URL, options: ScanOptions = ScanOptions()) -> [URL] {
+    FolderImageCache.shared.imageFiles(in: folderURL, options: options)
 }
 
-extension RotationConfig {
-    static func load() -> RotationConfig? {
-        guard let data = try? Data(contentsOf: WallpaperSetter.configURL) else { return nil }
-        return try? JSONDecoder().decode(RotationConfig.self, from: data)
+// MARK: - Config Persistence
+
+extension AppConfig {
+    static func load() -> AppConfig? {
+        let configURL = WallpaperSetter.configURL
+        if let data = try? Data(contentsOf: configURL) {
+            return try? JSONDecoder().decode(AppConfig.self, from: data)
+        }
+        let oldURL = WallpaperSetter.supportDir.appendingPathComponent("rotation.json")
+        guard let oldData = try? Data(contentsOf: oldURL),
+              let old = try? JSONDecoder().decode(RotationConfig.self, from: oldData) else {
+            return nil
+        }
+        let migrated = old.toAppConfig()
+        migrated.save()
+        try? FileManager.default.removeItem(at: oldURL)
+        Log.info("Migrated rotation.json -> config.json")
+        return migrated
     }
 
     func save() {
-        guard let data = try? JSONEncoder().encode(self) else { return }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        guard let data = try? encoder.encode(self) else { return }
         try? data.write(to: WallpaperSetter.configURL, options: .atomic)
     }
 
@@ -57,63 +61,107 @@ extension RotationConfig {
     }
 }
 
+// MARK: - Rotation Manager
+
 class RotationManager {
     static let shared = RotationManager()
 
     private var timer: Timer?
-    private(set) var config: RotationConfig?
+    var config: AppConfig?
     var lastAppliedImagePath: String?
 
-    var isActive: Bool { config != nil }
+    private var shuffledQueue: [URL] = []
+    private var shuffleIndex = 0
+
+    var isActive: Bool { config?.folderPath != nil }
 
     var folderName: String? {
         guard let path = config?.folderPath else { return nil }
         return (path as NSString).lastPathComponent
     }
 
-    func start(folderPath: String, intervalSeconds: Int = RotationConfig.defaultInterval) {
-        config = RotationConfig(folderPath: folderPath, intervalSeconds: intervalSeconds)
+    func scanOptions() -> ScanOptions {
+        guard let config = config else { return ScanOptions() }
+        return ScanOptions(from: config)
+    }
+
+    func start(folderPath: String, intervalSeconds: Int? = nil,
+              displayMode: DisplayMode? = nil, playMode: PlayMode? = nil) {
+        timer?.invalidate()
+        timer = nil
+        uninstallLaunchAgent()
+
+        if config == nil { config = AppConfig.load() ?? AppConfig() }
+        config?.folderPath = folderPath
+        config?.singleImagePath = nil
+        if let interval = intervalSeconds {
+            config?.intervalSeconds = interval
+        }
+        if let mode = displayMode {
+            config?.displayMode = mode
+        }
+        if let play = playMode {
+            config?.playMode = play
+        }
         config?.save()
+
+        resetShuffle()
         installLaunchAgent()
         applyNext()
         scheduleTimer()
-        Log.info("Rotation started: \(folderPath), interval \(intervalSeconds)s")
+        Log.info("Rotation started: \(folderPath), interval \(config?.intervalSeconds ?? AppConfig.defaultInterval)s")
     }
 
     func stop() {
         timer?.invalidate()
         timer = nil
-        config = nil
+        shuffledQueue = []
+        shuffleIndex = 0
+
+        if config?.folderPath != nil {
+            uninstallLaunchAgent()
+        }
+        config?.folderPath = nil
+        config?.lastImagePath = nil
         lastAppliedImagePath = nil
-        RotationConfig.remove()
-        uninstallLaunchAgent()
+        config?.save()
         Log.info("Rotation stopped.")
     }
 
     func applyNext() {
-        guard let config = config else { return }
-        let folder = URL(fileURLWithPath: config.folderPath)
+        guard let config = config, let folderPath = config.folderPath else { return }
+        let folder = URL(fileURLWithPath: folderPath)
 
         guard FileManager.default.isReadableFile(atPath: folder.path) else {
-            Log.info("Folder unavailable (ejected/missing?): \(config.folderPath) -- skipping tick")
+            Log.info("Folder unavailable: \(folderPath) -- skipping tick")
             return
         }
 
         FolderImageCache.shared.invalidate()
-        let images = imageFiles(in: folder)
+        let options = scanOptions()
+        let images = imageFiles(in: folder, options: options)
         guard !images.isEmpty else {
-            Log.info("No images in \(config.folderPath)")
+            Log.info("No images in \(folderPath)")
             return
         }
 
-        guard let next = pickNextImage(from: images, lastUsed: config.lastImagePath) else {
-            Log.info("No images in \(config.folderPath)")
+        let next: URL?
+        switch config.playMode {
+        case .sequential:
+            next = pickNextImage(from: images, lastUsed: config.lastImagePath, playMode: .sequential)
+        case .shuffle:
+            next = nextShuffled(from: images)
+        }
+
+        guard let nextImage = next else {
+            Log.info("No images in \(folderPath)")
             return
         }
+
         do {
-            try processImage(at: next.path)
-            lastAppliedImagePath = next.path
-            self.config?.lastImagePath = next.path
+            try processImage(at: nextImage.path, displayMode: config.displayMode)
+            lastAppliedImagePath = nextImage.path
+            self.config?.lastImagePath = nextImage.path
             self.config?.save()
         } catch {
             Log.info("Rotation error: \(error)")
@@ -127,25 +175,94 @@ class RotationManager {
                 return
             }
             do {
-                try processImage(at: path)
-                Log.info("Re-applied current wallpaper after display/wake change.")
+                try WallpaperSetter.withProcessLock {
+                    try processImage(at: path, displayMode: config?.displayMode ?? .span)
+                }
+                Log.info("Re-applied current wallpaper.")
             } catch {
                 Log.info("Re-apply error: \(error)")
             }
         }
     }
 
-    func resume() {
-        guard let saved = RotationConfig.load() else { return }
-        let folder = URL(fileURLWithPath: saved.folderPath)
-        guard FileManager.default.fileExists(atPath: folder.path) else {
-            RotationConfig.remove()
+    func retireCurrent() {
+        guard isActive else { return }
+        guard let currentPath = lastAppliedImagePath ?? config?.lastImagePath else { return }
+        let imageURL = URL(fileURLWithPath: currentPath)
+        let retiredDir = imageURL.deletingLastPathComponent()
+            .appendingPathComponent("retired", isDirectory: true)
+
+        let fm = FileManager.default
+        do {
+            try fm.createDirectory(at: retiredDir, withIntermediateDirectories: true)
+            var dest = retiredDir.appendingPathComponent(imageURL.lastPathComponent)
+            if fm.fileExists(atPath: dest.path) {
+                let stem = imageURL.deletingPathExtension().lastPathComponent
+                let ext = imageURL.pathExtension
+                var counter = 1
+                repeat {
+                    let name = ext.isEmpty ? "\(stem) (\(counter))" : "\(stem) (\(counter)).\(ext)"
+                    dest = retiredDir.appendingPathComponent(name)
+                    counter += 1
+                } while fm.fileExists(atPath: dest.path)
+            }
+            try fm.moveItem(at: imageURL, to: dest)
+            Log.info("Retired: \(imageURL.lastPathComponent) -> retired/\(dest.lastPathComponent)")
+        } catch {
+            Log.info("Retire failed: \(error)")
             return
         }
-        config = saved
-        scheduleTimer()
-        Log.info("Resumed rotation: \(saved.folderPath)")
+
+        FolderImageCache.shared.invalidate()
+        resetShuffle()
+        applyNext()
     }
+
+    func resume() {
+        guard let saved = AppConfig.load() else { return }
+        config = saved
+
+        if let folderPath = saved.folderPath {
+            let folder = URL(fileURLWithPath: folderPath)
+            guard FileManager.default.fileExists(atPath: folder.path) else {
+                config?.folderPath = nil
+                config?.save()
+                return
+            }
+            lastAppliedImagePath = saved.lastImagePath
+            scheduleTimer()
+            Log.info("Resumed rotation: \(folderPath)")
+        } else if let singlePath = saved.singleImagePath {
+            guard FileManager.default.fileExists(atPath: singlePath) else { return }
+            do {
+                try processImage(at: singlePath, displayMode: saved.displayMode)
+                lastAppliedImagePath = singlePath
+                Log.info("Reapplied single image: \(singlePath)")
+            } catch {
+                Log.info("Reapply error: \(error)")
+            }
+        }
+    }
+
+    // MARK: - Shuffle
+
+    private func resetShuffle() {
+        shuffledQueue = []
+        shuffleIndex = 0
+    }
+
+    private func nextShuffled(from images: [URL]) -> URL? {
+        guard !images.isEmpty else { return nil }
+        if shuffledQueue.isEmpty || shuffleIndex >= shuffledQueue.count {
+            shuffledQueue = images.shuffled()
+            shuffleIndex = 0
+        }
+        let result = shuffledQueue[shuffleIndex]
+        shuffleIndex += 1
+        return result
+    }
+
+    // MARK: - Timer
 
     private func scheduleTimer() {
         timer?.invalidate()
