@@ -253,6 +253,15 @@ cp -R "$BUNDLE" "$APP"
 touch "$APP"
 echo "Installed: $APP"
 
+# Code sign for persistent TCC grants
+SIGN_ID=$(security find-identity -v -p codesigning 2>/dev/null | head -1 | sed 's/.*"\(.*\)".*/\1/')
+if [[ -n "$SIGN_ID" ]]; then
+    codesign --force --sign "$SIGN_ID" "$APP" 2>&1
+    echo "Signed with: $SIGN_ID"
+else
+    echo "Warning: No code signing identity found. TCC grants won't persist across launches."
+fi
+
 # Register with LaunchServices
 LSREG="/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister"
 if [[ -x "$LSREG" ]]; then

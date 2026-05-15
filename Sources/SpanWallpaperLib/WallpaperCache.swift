@@ -1,6 +1,10 @@
 import Foundation
 
 public enum WallpaperCache {
+    public static func hasFDA() -> Bool {
+        FileManager.default.isReadableFile(atPath: "/Library/Application Support/com.apple.TCC/TCC.db")
+    }
+
     public static let directory: URL? = {
         let home = FileManager.default.homeDirectoryForCurrentUser
         let path = home.appendingPathComponent(
@@ -11,16 +15,6 @@ public enum WallpaperCache {
               isDir.boolValue else { return nil }
         return path
     }()
-
-    public static func hasAccess() -> Bool {
-        guard let dir = directory else { return false }
-        do {
-            _ = try FileManager.default.contentsOfDirectory(atPath: dir.path)
-            return true
-        } catch {
-            return false
-        }
-    }
 
     public static func sizeBytes() -> Int64 {
         guard let dir = directory else { return 0 }

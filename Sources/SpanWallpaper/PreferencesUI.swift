@@ -118,10 +118,15 @@ class PreferencesController: NSObject, NSTextFieldDelegate {
     private let maxHeightField = NSTextField()
     private let maxHeightSuffix = NSTextField(labelWithString: "H")
 
-    private let cacheButton = NSButton(title: "Clear Cache", target: nil, action: nil)
+    private let cacheToggle = NSButton(title: "\u{25B6}  Cache", target: nil, action: nil)
+    private let cacheContainer = NSView()
+    private let autoClearCheckbox = NSButton(checkboxWithTitle: "Auto-clear wallpaper cache on rotation", target: nil, action: nil)
+    private let cacheButton = NSButton(title: "Clear Cache Now", target: nil, action: nil)
 
     private var filtersExpanded = false
+    private var cacheExpanded = false
     private var filterContainerHeight: NSLayoutConstraint!
+    private var cacheContainerHeight: NSLayoutConstraint!
     private var selectedPath: String?
     private var selectedIsFolder = false
 
@@ -146,8 +151,9 @@ class PreferencesController: NSObject, NSTextFieldDelegate {
                           intervalPopup, playModeLabel, playModePopup,
                           displayModeLabel, displayModePopup,
                           filterToggle, filterContainer,
+                          cacheToggle, cacheContainer,
                           applyButton, nextButton, backButton, retireButton, stopButton,
-                          statusLabel, cacheButton, separator] {
+                          statusLabel, separator] {
             v.translatesAutoresizingMaskIntoConstraints = false
             content.addSubview(v)
         }
@@ -159,15 +165,20 @@ class PreferencesController: NSObject, NSTextFieldDelegate {
             filterContainer.addSubview(v)
         }
 
+        for v: NSView in [autoClearCheckbox, cacheButton] {
+            v.translatesAutoresizingMaskIntoConstraints = false
+            cacheContainer.addSubview(v)
+        }
+
         setupDropZone()
         setupPathRow()
         setupSeparator()
         setupIntervalRow()
         setupDisplayRow()
         setupFilterSection()
+        setupCacheSection()
         setupActionRow()
         setupStatusRow()
-        setupCacheButton()
         layoutConstraints()
 
         NotificationCenter.default.addObserver(self, selector: #selector(externalSyncUI),
@@ -372,16 +383,74 @@ class PreferencesController: NSObject, NSTextFieldDelegate {
         syncUI()
     }
 
-    private func setupCacheButton() {
+    private func setupCacheSection() {
+        cacheToggle.isBordered = false
+        cacheToggle.setButtonType(.momentaryPushIn)
+        cacheToggle.font = NSFont.systemFont(ofSize: 13, weight: .medium)
+        cacheToggle.contentTintColor = NSColor(white: 0.7, alpha: 1)
+        cacheToggle.alignment = .left
+        cacheToggle.target = self
+        cacheToggle.action = #selector(cacheToggleTapped)
+
+        cacheContainer.isHidden = true
+        cacheContainerHeight = cacheContainer.heightAnchor.constraint(equalToConstant: 0)
+        cacheContainerHeight.isActive = true
+
+        autoClearCheckbox.target = self
+        autoClearCheckbox.action = #selector(autoClearChanged)
+        let config = RotationManager.shared.config ?? AppConfig()
+        autoClearCheckbox.state = config.autoClearCache ? .on : .off
+
         cacheButton.target = self
         cacheButton.action = #selector(clearCacheTapped)
         cacheButton.bezelStyle = .rounded
         cacheButton.controlSize = .small
         cacheButton.font = NSFont.systemFont(ofSize: 11)
-        cacheButton.title = "Clear macOS Cache"
+    }
+
+    @objc private func cacheToggleTapped() {
+        cacheExpanded = !cacheExpanded
+        let expandedHeight: CGFloat = 60
+        let delta = cacheExpanded ? expandedHeight : -expandedHeight
+
+        cacheContainer.isHidden = !cacheExpanded
+        cacheContainerHeight.constant = cacheExpanded ? expandedHeight : 0
+
+        var frame = window.frame
+        frame.size.height += delta
+        frame.origin.y -= delta
+        window.setFrame(frame, display: true, animate: true)
+        updateCacheToggleTitle()
+    }
+
+    private func updateCacheToggleTitle() {
+        let arrow = cacheExpanded ? "\u{25BC}" : "\u{25B6}"
+        let config = RotationManager.shared.config ?? AppConfig()
+        let suffix = config.autoClearCache ? " (auto)" : ""
+        cacheToggle.title = "\(arrow)  Cache\(suffix)"
+    }
+
+    @objc private func autoClearChanged() {
+        let wantOn = autoClearCheckbox.state == .on
+        if wantOn && !WallpaperCache.hasFDA() {
+            autoClearCheckbox.state = .off
+            promptForFDA()
+            return
+        }
+        var config = RotationManager.shared.config ?? AppConfig()
+        config.autoClearCache = wantOn
+        config.cacheAccessConfirmed = wantOn
+        RotationManager.shared.config = config
+        config.save()
+        updateCacheToggleTitle()
     }
 
     @objc private func clearCacheTapped() {
+        if !WallpaperCache.hasFDA() {
+            promptForFDA()
+            return
+        }
+
         let size = WallpaperCache.formattedSize()
         let alert = NSAlert()
         alert.alertStyle = .informational
@@ -400,10 +469,26 @@ class PreferencesController: NSObject, NSTextFieldDelegate {
         alert.addButton(withTitle: "Cancel")
         guard alert.runModal() == .alertFirstButtonReturn else { return }
 
+        var config = RotationManager.shared.config ?? AppConfig()
+        config.cacheAccessConfirmed = true
+        RotationManager.shared.config = config
+        config.save()
+
         let deleted = WallpaperCache.purge(keeping: 0)
         if deleted > 0 {
             Log.info("Cleared \(deleted) macOS wallpaper cache files (\(size))")
         }
+    }
+
+    private func promptForFDA() {
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = "Full Disk Access Required"
+        alert.informativeText = "SpanWallpaper needs Full Disk Access to manage the macOS wallpaper cache.\n\n1. Click the \"+\" button below the app list\n2. Navigate to Applications and select SpanWallpaper\n3. Come back here and try again\n\nThis is a one-time setup."
+        alert.addButton(withTitle: "Open System Settings")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")!)
     }
 
     private func setupActionRow() {
@@ -565,8 +650,24 @@ class PreferencesController: NSObject, NSTextFieldDelegate {
             maxHeightSuffix.centerYAnchor.constraint(equalTo: maxSizeLabel.centerYAnchor),
             maxHeightSuffix.leadingAnchor.constraint(equalTo: maxHeightField.trailingAnchor, constant: 3),
 
+            // Cache toggle
+            cacheToggle.topAnchor.constraint(equalTo: filterContainer.bottomAnchor, constant: 8),
+            cacheToggle.leadingAnchor.constraint(equalTo: c.leadingAnchor, constant: m),
+
+            // Cache container
+            cacheContainer.topAnchor.constraint(equalTo: cacheToggle.bottomAnchor, constant: 8),
+            cacheContainer.leadingAnchor.constraint(equalTo: c.leadingAnchor, constant: m + 12),
+            cacheContainer.trailingAnchor.constraint(equalTo: c.trailingAnchor, constant: -m),
+
+            // Cache container internals
+            autoClearCheckbox.topAnchor.constraint(equalTo: cacheContainer.topAnchor, constant: 4),
+            autoClearCheckbox.leadingAnchor.constraint(equalTo: cacheContainer.leadingAnchor),
+
+            cacheButton.topAnchor.constraint(equalTo: autoClearCheckbox.bottomAnchor, constant: 8),
+            cacheButton.leadingAnchor.constraint(equalTo: cacheContainer.leadingAnchor),
+
             // Action row
-            stopButton.topAnchor.constraint(equalTo: filterContainer.bottomAnchor, constant: 16),
+            stopButton.topAnchor.constraint(equalTo: cacheContainer.bottomAnchor, constant: 16),
             stopButton.leadingAnchor.constraint(equalTo: c.leadingAnchor, constant: m),
 
             retireButton.centerYAnchor.constraint(equalTo: stopButton.centerYAnchor),
@@ -582,12 +683,8 @@ class PreferencesController: NSObject, NSTextFieldDelegate {
             applyButton.trailingAnchor.constraint(equalTo: c.trailingAnchor, constant: -m),
             applyButton.widthAnchor.constraint(equalToConstant: 80),
 
-            // Cache button
-            cacheButton.topAnchor.constraint(equalTo: stopButton.bottomAnchor, constant: 12),
-            cacheButton.leadingAnchor.constraint(equalTo: c.leadingAnchor, constant: m),
-
             // Status row
-            statusLabel.topAnchor.constraint(equalTo: cacheButton.bottomAnchor, constant: 8),
+            statusLabel.topAnchor.constraint(equalTo: stopButton.bottomAnchor, constant: 8),
             statusLabel.leadingAnchor.constraint(equalTo: c.leadingAnchor, constant: m),
             statusLabel.trailingAnchor.constraint(equalTo: c.trailingAnchor, constant: -m),
             statusLabel.bottomAnchor.constraint(lessThanOrEqualTo: c.bottomAnchor, constant: -m),
@@ -633,6 +730,7 @@ class PreferencesController: NSObject, NSTextFieldDelegate {
         stopButton.isHidden = !rotating
 
         updateFilterToggleTitle()
+        updateCacheToggleTitle()
 
         applyButton.isEnabled = selectedPath != nil
 

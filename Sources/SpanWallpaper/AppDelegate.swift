@@ -83,7 +83,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             WallpaperSetter.writeError("\(error)")
         }
 
-        if WallpaperCache.hasAccess() {
+        if config.autoClearCache, config.cacheAccessConfirmed, WallpaperCache.hasFDA() {
             let deleted = WallpaperCache.purge(keeping: 10)
             if deleted > 0 {
                 Log.info("Purged \(deleted) macOS wallpaper cache files")

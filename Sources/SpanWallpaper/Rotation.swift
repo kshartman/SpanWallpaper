@@ -166,7 +166,6 @@ class RotationManager {
         } catch {
             Log.info("Rotation error: \(error)")
         }
-        purgeCache()
     }
 
     func applyPrevious() {
@@ -188,7 +187,6 @@ class RotationManager {
         } catch {
             Log.info("Previous error: \(error)")
         }
-        purgeCache()
     }
 
     func reapplyCurrent() {
@@ -267,14 +265,6 @@ class RotationManager {
         }
     }
 
-    private func purgeCache() {
-        if WallpaperCache.hasAccess() {
-            let deleted = WallpaperCache.purge(keeping: 10)
-            if deleted > 0 {
-                Log.info("Purged \(deleted) macOS wallpaper cache files")
-            }
-        }
-    }
 
     // MARK: - Shuffle
 

@@ -28,6 +28,8 @@ public struct AppConfig: Codable, Equatable {
     public var maxWidth: Int?
     public var maxHeight: Int?
     public var displayMode: DisplayMode
+    public var autoClearCache: Bool
+    public var cacheAccessConfirmed: Bool
 
     public static let defaultInterval = 86400
 
@@ -43,7 +45,9 @@ public struct AppConfig: Codable, Equatable {
         minHeight: Int? = nil,
         maxWidth: Int? = nil,
         maxHeight: Int? = nil,
-        displayMode: DisplayMode = .span
+        displayMode: DisplayMode = .span,
+        autoClearCache: Bool = false,
+        cacheAccessConfirmed: Bool = false
     ) {
         self.folderPath = folderPath
         self.singleImagePath = singleImagePath
@@ -57,6 +61,8 @@ public struct AppConfig: Codable, Equatable {
         self.maxWidth = maxWidth
         self.maxHeight = maxHeight
         self.displayMode = displayMode
+        self.autoClearCache = autoClearCache
+        self.cacheAccessConfirmed = cacheAccessConfirmed
     }
 
     public init(from decoder: Decoder) throws {
@@ -73,6 +79,8 @@ public struct AppConfig: Codable, Equatable {
         maxWidth = try c.decodeIfPresent(Int.self, forKey: .maxWidth)
         maxHeight = try c.decodeIfPresent(Int.self, forKey: .maxHeight)
         displayMode = try c.decodeIfPresent(DisplayMode.self, forKey: .displayMode) ?? .span
+        autoClearCache = try c.decodeIfPresent(Bool.self, forKey: .autoClearCache) ?? false
+        cacheAccessConfirmed = try c.decodeIfPresent(Bool.self, forKey: .cacheAccessConfirmed) ?? false
     }
 }
 
