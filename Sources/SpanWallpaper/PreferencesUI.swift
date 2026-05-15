@@ -98,19 +98,25 @@ class PreferencesController: NSObject {
     private let statusLabel = NSTextField(labelWithString: "")
     private let separator = NSBox()
 
-    private let filterToggle = NSButton(title: "Filters", target: nil, action: nil)
+    private let filterToggle = NSButton(title: "\u{25B6}  Filters", target: nil, action: nil)
     private let filterContainer = NSView()
     private let recursiveCheckbox = NSButton(checkboxWithTitle: "Scan subfolders", target: nil, action: nil)
     private let excludeLabel = NSTextField(labelWithString: "Exclude:")
+    private let excludeFixedTag = NSTextField(labelWithString: "retired")
+    private let excludePlusLabel = NSTextField(labelWithString: "+")
     private let excludeField = NSTextField()
-    private let minWidthLabel = NSTextField(labelWithString: "Min size:")
+    private let minSizeLabel = NSTextField(labelWithString: "Min size:")
     private let minWidthField = NSTextField()
+    private let minWidthSuffix = NSTextField(labelWithString: "W")
+    private let minSizeX = NSTextField(labelWithString: "\u{00D7}")
     private let minHeightField = NSTextField()
-    private let minSizeX = NSTextField(labelWithString: "x")
-    private let maxWidthLabel = NSTextField(labelWithString: "Max size:")
+    private let minHeightSuffix = NSTextField(labelWithString: "H")
+    private let maxSizeLabel = NSTextField(labelWithString: "Max size:")
     private let maxWidthField = NSTextField()
+    private let maxWidthSuffix = NSTextField(labelWithString: "W")
+    private let maxSizeX = NSTextField(labelWithString: "\u{00D7}")
     private let maxHeightField = NSTextField()
-    private let maxSizeX = NSTextField(labelWithString: "x")
+    private let maxHeightSuffix = NSTextField(labelWithString: "H")
 
     private var filtersExpanded = false
     private var filterContainerHeight: NSLayoutConstraint!
@@ -144,9 +150,9 @@ class PreferencesController: NSObject {
             content.addSubview(v)
         }
 
-        for v: NSView in [recursiveCheckbox, excludeLabel, excludeField,
-                          minWidthLabel, minWidthField, minSizeX, minHeightField,
-                          maxWidthLabel, maxWidthField, maxSizeX, maxHeightField] {
+        for v: NSView in [recursiveCheckbox, excludeLabel, excludeFixedTag, excludePlusLabel, excludeField,
+                          minSizeLabel, minWidthField, minWidthSuffix, minSizeX, minHeightField, minHeightSuffix,
+                          maxSizeLabel, maxWidthField, maxWidthSuffix, maxSizeX, maxHeightField, maxHeightSuffix] {
             v.translatesAutoresizingMaskIntoConstraints = false
             filterContainer.addSubview(v)
         }
@@ -236,12 +242,13 @@ class PreferencesController: NSObject {
     }
 
     private func setupFilterSection() {
-        filterToggle.bezelStyle = .disclosure
-        filterToggle.setButtonType(.pushOnPushOff)
-        filterToggle.title = "Filters"
+        filterToggle.isBordered = false
+        filterToggle.setButtonType(.momentaryPushIn)
+        filterToggle.font = NSFont.systemFont(ofSize: 13, weight: .medium)
+        filterToggle.contentTintColor = NSColor(white: 0.7, alpha: 1)
+        filterToggle.alignment = .left
         filterToggle.target = self
         filterToggle.action = #selector(filterToggleTapped)
-        filterToggle.state = .off
 
         filterContainer.isHidden = true
         filterContainerHeight = filterContainer.heightAnchor.constraint(equalToConstant: 0)
@@ -250,10 +257,26 @@ class PreferencesController: NSObject {
         recursiveCheckbox.target = self
         recursiveCheckbox.action = #selector(filterChanged)
 
-        for label in [excludeLabel, minWidthLabel, maxWidthLabel, minSizeX, maxSizeX] {
-            label.textColor = NSColor(white: 0.6, alpha: 1)
+        let dimLabels: [NSTextField] = [excludeLabel, excludePlusLabel, minSizeLabel, maxSizeLabel,
+                                         minWidthSuffix, minHeightSuffix, maxWidthSuffix, maxHeightSuffix,
+                                         minSizeX, maxSizeX]
+        for label in dimLabels {
+            label.textColor = NSColor(white: 0.5, alpha: 1)
             label.font = NSFont.systemFont(ofSize: 12)
         }
+
+        excludeFixedTag.font = NSFont.systemFont(ofSize: 12, weight: .medium)
+        excludeFixedTag.textColor = NSColor(white: 0.45, alpha: 1)
+        excludeFixedTag.drawsBackground = true
+        excludeFixedTag.backgroundColor = NSColor(white: 0.18, alpha: 1)
+        excludeFixedTag.isBordered = false
+        excludeFixedTag.isEditable = false
+        excludeFixedTag.isSelectable = false
+        excludeFixedTag.alignment = .center
+        excludeFixedTag.wantsLayer = true
+        excludeFixedTag.layer?.cornerRadius = 3
+
+        excludePlusLabel.font = NSFont.systemFont(ofSize: 13, weight: .medium)
 
         for field in [excludeField, minWidthField, minHeightField, maxWidthField, maxHeightField] {
             field.font = NSFont.systemFont(ofSize: 12)
@@ -264,14 +287,16 @@ class PreferencesController: NSObject {
             field.focusRingType = .none
         }
 
-        excludeField.placeholderString = "retired, temp"
-        for field in [minWidthField, minHeightField, maxWidthField, maxHeightField] {
-            field.placeholderString = ""
-        }
+        excludeField.placeholderString = "additional patterns"
+        minWidthField.placeholderString = "width"
+        minHeightField.placeholderString = "height"
+        maxWidthField.placeholderString = "width"
+        maxHeightField.placeholderString = "height"
 
         let config = RotationManager.shared.config ?? AppConfig()
         recursiveCheckbox.state = config.recursive ? .on : .off
-        excludeField.stringValue = config.excludePatterns.joined(separator: ", ")
+        let additionalPatterns = config.excludePatterns.filter { $0 != "retired" }
+        excludeField.stringValue = additionalPatterns.joined(separator: ", ")
         minWidthField.stringValue = config.minWidth.map(String.init) ?? ""
         minHeightField.stringValue = config.minHeight.map(String.init) ?? ""
         maxWidthField.stringValue = config.maxWidth.map(String.init) ?? ""
@@ -292,12 +317,13 @@ class PreferencesController: NSObject {
 
     private func updateFilterToggleTitle() {
         let count = activeFilterCount()
-        filterToggle.title = count > 0 ? "Filters (\(count) active)" : "Filters"
+        let arrow = filtersExpanded ? "\u{25BC}" : "\u{25B6}"
+        filterToggle.title = count > 0 ? "\(arrow)  Filters (\(count) active)" : "\(arrow)  Filters"
     }
 
     @objc private func filterToggleTapped() {
-        filtersExpanded = filterToggle.state == .on
-        let expandedHeight: CGFloat = 110
+        filtersExpanded = !filtersExpanded
+        let expandedHeight: CGFloat = 140
         let delta = filtersExpanded ? expandedHeight : -expandedHeight
 
         filterContainer.isHidden = !filtersExpanded
@@ -307,6 +333,7 @@ class PreferencesController: NSObject {
         frame.size.height += delta
         frame.origin.y -= delta
         window.setFrame(frame, display: true, animate: true)
+        updateFilterToggleTitle()
     }
 
     @objc private func filterChanged() {
@@ -318,8 +345,8 @@ class PreferencesController: NSObject {
         config.recursive = recursiveCheckbox.state == .on
 
         let raw = excludeField.stringValue
-        let patterns = raw.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
-        config.excludePatterns = patterns.isEmpty ? ["retired"] : patterns
+        let additional = raw.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty && $0 != "retired" }
+        config.excludePatterns = ["retired"] + additional
 
         config.minWidth = Int(minWidthField.stringValue)
         config.minHeight = Int(minHeightField.stringValue)
@@ -415,60 +442,83 @@ class PreferencesController: NSObject {
             displayModePopup.trailingAnchor.constraint(equalTo: c.trailingAnchor, constant: -m),
 
             // Filter toggle
-            filterToggle.topAnchor.constraint(equalTo: playModePopup.bottomAnchor, constant: 10),
+            filterToggle.topAnchor.constraint(equalTo: playModePopup.bottomAnchor, constant: 12),
             filterToggle.leadingAnchor.constraint(equalTo: c.leadingAnchor, constant: m),
 
             // Filter container
-            filterContainer.topAnchor.constraint(equalTo: filterToggle.bottomAnchor, constant: 4),
-            filterContainer.leadingAnchor.constraint(equalTo: c.leadingAnchor, constant: m + 16),
+            filterContainer.topAnchor.constraint(equalTo: filterToggle.bottomAnchor, constant: 8),
+            filterContainer.leadingAnchor.constraint(equalTo: c.leadingAnchor, constant: m + 12),
             filterContainer.trailingAnchor.constraint(equalTo: c.trailingAnchor, constant: -m),
 
-            // Filter contents
+            // Row 1: Scan subfolders
             recursiveCheckbox.topAnchor.constraint(equalTo: filterContainer.topAnchor, constant: 4),
             recursiveCheckbox.leadingAnchor.constraint(equalTo: filterContainer.leadingAnchor),
 
-            excludeLabel.topAnchor.constraint(equalTo: recursiveCheckbox.bottomAnchor, constant: 8),
+            // Row 2: Exclude -- "retired" tag + additional patterns field
+            excludeLabel.topAnchor.constraint(equalTo: recursiveCheckbox.bottomAnchor, constant: 12),
             excludeLabel.leadingAnchor.constraint(equalTo: filterContainer.leadingAnchor),
             excludeLabel.widthAnchor.constraint(equalToConstant: 55),
 
+            excludeFixedTag.centerYAnchor.constraint(equalTo: excludeLabel.centerYAnchor),
+            excludeFixedTag.leadingAnchor.constraint(equalTo: excludeLabel.trailingAnchor, constant: 6),
+            excludeFixedTag.widthAnchor.constraint(equalToConstant: 52),
+            excludeFixedTag.heightAnchor.constraint(equalToConstant: 20),
+
+            excludePlusLabel.centerYAnchor.constraint(equalTo: excludeLabel.centerYAnchor),
+            excludePlusLabel.leadingAnchor.constraint(equalTo: excludeFixedTag.trailingAnchor, constant: 6),
+
             excludeField.centerYAnchor.constraint(equalTo: excludeLabel.centerYAnchor),
-            excludeField.leadingAnchor.constraint(equalTo: excludeLabel.trailingAnchor, constant: 6),
+            excludeField.leadingAnchor.constraint(equalTo: excludePlusLabel.trailingAnchor, constant: 6),
             excludeField.trailingAnchor.constraint(equalTo: filterContainer.trailingAnchor),
             excludeField.heightAnchor.constraint(equalToConstant: 22),
 
-            minWidthLabel.topAnchor.constraint(equalTo: excludeField.bottomAnchor, constant: 8),
-            minWidthLabel.leadingAnchor.constraint(equalTo: filterContainer.leadingAnchor),
-            minWidthLabel.widthAnchor.constraint(equalToConstant: 55),
+            // Row 3: Min size -- width W x height H
+            minSizeLabel.topAnchor.constraint(equalTo: excludeField.bottomAnchor, constant: 12),
+            minSizeLabel.leadingAnchor.constraint(equalTo: filterContainer.leadingAnchor),
+            minSizeLabel.widthAnchor.constraint(equalToConstant: 55),
 
-            minWidthField.centerYAnchor.constraint(equalTo: minWidthLabel.centerYAnchor),
-            minWidthField.leadingAnchor.constraint(equalTo: minWidthLabel.trailingAnchor, constant: 6),
-            minWidthField.widthAnchor.constraint(equalToConstant: 60),
+            minWidthField.centerYAnchor.constraint(equalTo: minSizeLabel.centerYAnchor),
+            minWidthField.leadingAnchor.constraint(equalTo: minSizeLabel.trailingAnchor, constant: 6),
+            minWidthField.widthAnchor.constraint(equalToConstant: 65),
             minWidthField.heightAnchor.constraint(equalToConstant: 22),
 
-            minSizeX.centerYAnchor.constraint(equalTo: minWidthLabel.centerYAnchor),
-            minSizeX.leadingAnchor.constraint(equalTo: minWidthField.trailingAnchor, constant: 4),
+            minWidthSuffix.centerYAnchor.constraint(equalTo: minSizeLabel.centerYAnchor),
+            minWidthSuffix.leadingAnchor.constraint(equalTo: minWidthField.trailingAnchor, constant: 3),
 
-            minHeightField.centerYAnchor.constraint(equalTo: minWidthLabel.centerYAnchor),
-            minHeightField.leadingAnchor.constraint(equalTo: minSizeX.trailingAnchor, constant: 4),
-            minHeightField.widthAnchor.constraint(equalToConstant: 60),
+            minSizeX.centerYAnchor.constraint(equalTo: minSizeLabel.centerYAnchor),
+            minSizeX.leadingAnchor.constraint(equalTo: minWidthSuffix.trailingAnchor, constant: 6),
+
+            minHeightField.centerYAnchor.constraint(equalTo: minSizeLabel.centerYAnchor),
+            minHeightField.leadingAnchor.constraint(equalTo: minSizeX.trailingAnchor, constant: 6),
+            minHeightField.widthAnchor.constraint(equalToConstant: 65),
             minHeightField.heightAnchor.constraint(equalToConstant: 22),
 
-            maxWidthLabel.centerYAnchor.constraint(equalTo: minWidthLabel.centerYAnchor),
-            maxWidthLabel.leadingAnchor.constraint(equalTo: minHeightField.trailingAnchor, constant: 16),
-            maxWidthLabel.widthAnchor.constraint(equalToConstant: 55),
+            minHeightSuffix.centerYAnchor.constraint(equalTo: minSizeLabel.centerYAnchor),
+            minHeightSuffix.leadingAnchor.constraint(equalTo: minHeightField.trailingAnchor, constant: 3),
 
-            maxWidthField.centerYAnchor.constraint(equalTo: minWidthLabel.centerYAnchor),
-            maxWidthField.leadingAnchor.constraint(equalTo: maxWidthLabel.trailingAnchor, constant: 6),
-            maxWidthField.widthAnchor.constraint(equalToConstant: 60),
+            // Row 4: Max size -- width W x height H
+            maxSizeLabel.topAnchor.constraint(equalTo: minSizeLabel.bottomAnchor, constant: 12),
+            maxSizeLabel.leadingAnchor.constraint(equalTo: filterContainer.leadingAnchor),
+            maxSizeLabel.widthAnchor.constraint(equalToConstant: 55),
+
+            maxWidthField.centerYAnchor.constraint(equalTo: maxSizeLabel.centerYAnchor),
+            maxWidthField.leadingAnchor.constraint(equalTo: maxSizeLabel.trailingAnchor, constant: 6),
+            maxWidthField.widthAnchor.constraint(equalToConstant: 65),
             maxWidthField.heightAnchor.constraint(equalToConstant: 22),
 
-            maxSizeX.centerYAnchor.constraint(equalTo: minWidthLabel.centerYAnchor),
-            maxSizeX.leadingAnchor.constraint(equalTo: maxWidthField.trailingAnchor, constant: 4),
+            maxWidthSuffix.centerYAnchor.constraint(equalTo: maxSizeLabel.centerYAnchor),
+            maxWidthSuffix.leadingAnchor.constraint(equalTo: maxWidthField.trailingAnchor, constant: 3),
 
-            maxHeightField.centerYAnchor.constraint(equalTo: minWidthLabel.centerYAnchor),
-            maxHeightField.leadingAnchor.constraint(equalTo: maxSizeX.trailingAnchor, constant: 4),
-            maxHeightField.widthAnchor.constraint(equalToConstant: 60),
+            maxSizeX.centerYAnchor.constraint(equalTo: maxSizeLabel.centerYAnchor),
+            maxSizeX.leadingAnchor.constraint(equalTo: maxWidthSuffix.trailingAnchor, constant: 6),
+
+            maxHeightField.centerYAnchor.constraint(equalTo: maxSizeLabel.centerYAnchor),
+            maxHeightField.leadingAnchor.constraint(equalTo: maxSizeX.trailingAnchor, constant: 6),
+            maxHeightField.widthAnchor.constraint(equalToConstant: 65),
             maxHeightField.heightAnchor.constraint(equalToConstant: 22),
+
+            maxHeightSuffix.centerYAnchor.constraint(equalTo: maxSizeLabel.centerYAnchor),
+            maxHeightSuffix.leadingAnchor.constraint(equalTo: maxHeightField.trailingAnchor, constant: 3),
 
             // Action row
             stopButton.topAnchor.constraint(equalTo: filterContainer.bottomAnchor, constant: 16),
