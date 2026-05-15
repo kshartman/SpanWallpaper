@@ -23,6 +23,7 @@ Double-click the app (or click **Preferences** in the menu bar icon) to open the
 - **Drop zone** -- drag an image or folder onto it
 - **Choose...** -- browse for an image file or folder
 - **Rotate / Order / Display** -- interval (30 min to 1 week), shuffle or sequential, and Span/Fit/Fill mode
+- **Theme** -- System, Dark, or Light appearance
 - **Filters** -- collapsible section for recursive scanning, exclude patterns (glob), and min/max size constraints
 - **Cache** -- collapsible section to manage macOS wallpaper cache; auto-clear on rotation or clear manually (requires Full Disk Access)
 - **Apply** -- apply the current selection

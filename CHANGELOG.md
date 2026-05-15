@@ -1,5 +1,20 @@
 # Changelog
 
+## 2.1.1 — 2026-05-15
+
+Appearance switcher and UI fix.
+
+### Features
+- **Theme switcher**: choose System, Dark, or Light appearance from a segmented control in preferences -- persisted across launches
+
+### Bug fixes
+- **Cache section text now visible**: checkbox and button in the collapsible Cache section were nearly invisible against the dark background -- all UI colors now use semantic AppKit colors that adapt to any appearance
+
+### Under the hood
+- `AppearanceMode` enum in SpanWallpaperLib (system/dark/light) with `appearanceMode` field in `AppConfig` (backward-compatible default: system)
+- Replaced all hardcoded `NSColor(white:)` values with semantic colors (`.secondaryLabelColor`, `.controlBackgroundColor`, `.tertiaryLabelColor`, etc.)
+- Window appearance set via `NSAppearance` per-window, not app-wide
+
 ## 2.1.0 — 2026-05-15
 
 macOS wallpaper cache management.
