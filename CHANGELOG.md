@@ -1,15 +1,18 @@
 # Changelog
 
-## 2.0.0 — 2026-05-14
+## 2.0.0 — 2026-05-15
 
-Engine refactor and feature expansion.
+Engine refactor, UI overhaul, and feature expansion.
 
 ### Features
 - **Display modes**: Span (all monitors), Fit (letterbox), Fill (crop per screen)
+- **Menu bar icon**: monochrome dual-monitor glyph in the system status bar; app no longer appears in Dock or Cmd-Tab (`LSUIElement`)
 - **Shuffle/Sequential**: choose play order for folder rotation
+- **Back button**: step backward through the sorted image list in sequential mode (full wrap-around)
 - **Retire button**: move current wallpaper to a `retired/` subfolder and advance
+- **Collapsible filter section**: toggle open/closed with ▶/▼ button
 - **Recursive scanning**: finds images in subdirectories (default on)
-- **Exclude patterns**: skip folders/files matching glob patterns (`retired` excluded by default)
+- **Exclude patterns**: case-insensitive glob matching (`retired` always excluded, add comma-separated patterns)
 - **Size filtering**: optional min/max width and height constraints
 - **Unified config**: all settings persist in `config.json` (auto-migrates from `rotation.json`)
 - **Single image tracking**: reapplies last single image on relaunch
@@ -18,14 +21,18 @@ Engine refactor and feature expansion.
 - Clicking the app icon now reopens the preferences window when the app is already running
 - Dropping an image during active rotation now stops rotation and applies immediately
 - Dropping a folder now starts rotation immediately (no manual Apply needed)
+- Filter text fields now save values on focus loss and before apply
+- Exclude pattern matching is now case-insensitive (`FNM_CASEFOLD`)
 
 ### Under the hood
+- `StatusBarController` with dynamic `NSMenu` (current image, next/previous/retire, preferences, quit)
+- Collapsible filter UI with non-editable "retired" tag, separate additional patterns field
+- `pickPreviousImage` pure function for deterministic backward traversal
 - New `Scanner.swift` in SpanWallpaperLib with configurable recursive scanning, exclusion patterns, and size filtering
 - `AppConfig` replaces `RotationConfig` with automatic migration
 - Fisher-Yates shuffle with in-memory queue (degrades to random for launchd ticks)
 - Fit/Fill modes bypass the slice pipeline entirely — pass original image to NSWorkspace
-- Dock menu gains Retire Current option
-- 51 unit tests (up from 25) covering config, scanner, shuffle, migration, and exclusion patterns
+- 59 unit tests (up from 25) covering config, scanner, shuffle, migration, exclusion, and previous-image selection
 
 ## 1.0.0 — 2026-05-13
 
