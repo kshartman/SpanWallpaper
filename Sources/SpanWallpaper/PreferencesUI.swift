@@ -118,6 +118,8 @@ class PreferencesController: NSObject, NSTextFieldDelegate {
     private let maxHeightField = NSTextField()
     private let maxHeightSuffix = NSTextField(labelWithString: "H")
 
+    private let cacheButton = NSButton(title: "Clear Cache", target: nil, action: nil)
+
     private var filtersExpanded = false
     private var filterContainerHeight: NSLayoutConstraint!
     private var selectedPath: String?
@@ -145,7 +147,7 @@ class PreferencesController: NSObject, NSTextFieldDelegate {
                           displayModeLabel, displayModePopup,
                           filterToggle, filterContainer,
                           applyButton, nextButton, backButton, retireButton, stopButton,
-                          statusLabel, separator] {
+                          statusLabel, cacheButton, separator] {
             v.translatesAutoresizingMaskIntoConstraints = false
             content.addSubview(v)
         }
@@ -165,6 +167,7 @@ class PreferencesController: NSObject, NSTextFieldDelegate {
         setupFilterSection()
         setupActionRow()
         setupStatusRow()
+        setupCacheButton()
         layoutConstraints()
 
         NotificationCenter.default.addObserver(self, selector: #selector(externalSyncUI),
@@ -369,6 +372,40 @@ class PreferencesController: NSObject, NSTextFieldDelegate {
         syncUI()
     }
 
+    private func setupCacheButton() {
+        cacheButton.target = self
+        cacheButton.action = #selector(clearCacheTapped)
+        cacheButton.bezelStyle = .rounded
+        cacheButton.controlSize = .small
+        cacheButton.font = NSFont.systemFont(ofSize: 11)
+        cacheButton.title = "Clear macOS Cache"
+    }
+
+    @objc private func clearCacheTapped() {
+        let size = WallpaperCache.formattedSize()
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+
+        if size == "empty" {
+            alert.messageText = "macOS Wallpaper Cache"
+            alert.informativeText = "The cache is empty. Nothing to clear."
+            alert.addButton(withTitle: "OK")
+            alert.runModal()
+            return
+        }
+
+        alert.messageText = "Clear macOS Wallpaper Cache"
+        alert.informativeText = "macOS has cached \(size) of wallpaper data. This is safe to delete — macOS will regenerate files as needed."
+        alert.addButton(withTitle: "Clear \(size)")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+
+        let deleted = WallpaperCache.purge(keeping: 0)
+        if deleted > 0 {
+            Log.info("Cleared \(deleted) macOS wallpaper cache files (\(size))")
+        }
+    }
+
     private func setupActionRow() {
         applyButton.target = self
         applyButton.action = #selector(applyTapped)
@@ -545,8 +582,12 @@ class PreferencesController: NSObject, NSTextFieldDelegate {
             applyButton.trailingAnchor.constraint(equalTo: c.trailingAnchor, constant: -m),
             applyButton.widthAnchor.constraint(equalToConstant: 80),
 
+            // Cache button
+            cacheButton.topAnchor.constraint(equalTo: stopButton.bottomAnchor, constant: 12),
+            cacheButton.leadingAnchor.constraint(equalTo: c.leadingAnchor, constant: m),
+
             // Status row
-            statusLabel.topAnchor.constraint(equalTo: stopButton.bottomAnchor, constant: 12),
+            statusLabel.topAnchor.constraint(equalTo: cacheButton.bottomAnchor, constant: 8),
             statusLabel.leadingAnchor.constraint(equalTo: c.leadingAnchor, constant: m),
             statusLabel.trailingAnchor.constraint(equalTo: c.trailingAnchor, constant: -m),
             statusLabel.bottomAnchor.constraint(lessThanOrEqualTo: c.bottomAnchor, constant: -m),
@@ -612,6 +653,7 @@ class PreferencesController: NSObject, NSTextFieldDelegate {
         } else {
             statusLabel.stringValue = ""
         }
+
     }
 
     func handleFile(_ url: URL) {

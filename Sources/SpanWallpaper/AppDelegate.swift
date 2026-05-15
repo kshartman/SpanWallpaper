@@ -56,11 +56,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         RotationManager.shared.resume()
         registerDisplayObservers()
-
-        let hasConfig = AppConfig.load() != nil
-        if !hasConfig || !RotationManager.shared.isActive {
-            showPreferences()
-        }
+        showPreferences()
     }
 
     private func handleRotateTick() {
@@ -85,6 +81,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         } catch {
             Log.info("ERROR: \(error)")
             WallpaperSetter.writeError("\(error)")
+        }
+
+        if WallpaperCache.hasAccess() {
+            let deleted = WallpaperCache.purge(keeping: 10)
+            if deleted > 0 {
+                Log.info("Purged \(deleted) macOS wallpaper cache files")
+            }
         }
     }
 

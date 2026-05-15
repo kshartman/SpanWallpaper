@@ -1,5 +1,19 @@
 # Changelog
 
+## 2.1.0 — 2026-05-15
+
+macOS wallpaper cache management.
+
+### Features
+- **Cache cleanup button**: "Clear macOS Cache" in preferences — shows cache size and confirms before purging
+- **Auto-purge**: keeps only the 10 most recent cached wallpaper BMPs after each rotation (Next, Back, Retire, launchd tick)
+- **Preferences on launch**: double-clicking the app always opens the preferences window
+
+### Under the hood
+- `WallpaperCache` module in SpanWallpaperLib with `hasAccess()`, `sizeBytes()`, `formattedSize()`, and `purge(keeping:)`
+- TCC-safe: no file access until user explicitly clicks the cache button (avoids startup prompts)
+- Cache purge runs in RotationManager after interactive actions and in AppDelegate for launchd ticks
+
 ## 2.0.0 — 2026-05-15
 
 Engine refactor, UI overhaul, and feature expansion.
