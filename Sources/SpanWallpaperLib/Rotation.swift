@@ -13,6 +13,12 @@ public enum DisplayMode: String, Codable, Equatable, CaseIterable {
     case fill
 }
 
+public enum AppearanceMode: String, Codable, Equatable, CaseIterable {
+    case system
+    case dark
+    case light
+}
+
 // MARK: - AppConfig
 
 public struct AppConfig: Codable, Equatable {
@@ -28,6 +34,7 @@ public struct AppConfig: Codable, Equatable {
     public var maxWidth: Int?
     public var maxHeight: Int?
     public var displayMode: DisplayMode
+    public var appearanceMode: AppearanceMode
     public var autoClearCache: Bool
     public var cacheAccessConfirmed: Bool
 
@@ -46,6 +53,7 @@ public struct AppConfig: Codable, Equatable {
         maxWidth: Int? = nil,
         maxHeight: Int? = nil,
         displayMode: DisplayMode = .span,
+        appearanceMode: AppearanceMode = .system,
         autoClearCache: Bool = false,
         cacheAccessConfirmed: Bool = false
     ) {
@@ -61,6 +69,7 @@ public struct AppConfig: Codable, Equatable {
         self.maxWidth = maxWidth
         self.maxHeight = maxHeight
         self.displayMode = displayMode
+        self.appearanceMode = appearanceMode
         self.autoClearCache = autoClearCache
         self.cacheAccessConfirmed = cacheAccessConfirmed
     }
@@ -79,6 +88,7 @@ public struct AppConfig: Codable, Equatable {
         maxWidth = try c.decodeIfPresent(Int.self, forKey: .maxWidth)
         maxHeight = try c.decodeIfPresent(Int.self, forKey: .maxHeight)
         displayMode = try c.decodeIfPresent(DisplayMode.self, forKey: .displayMode) ?? .span
+        appearanceMode = try c.decodeIfPresent(AppearanceMode.self, forKey: .appearanceMode) ?? .system
         autoClearCache = try c.decodeIfPresent(Bool.self, forKey: .autoClearCache) ?? false
         cacheAccessConfirmed = try c.decodeIfPresent(Bool.self, forKey: .cacheAccessConfirmed) ?? false
     }

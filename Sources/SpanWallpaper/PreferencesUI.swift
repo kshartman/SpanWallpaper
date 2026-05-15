@@ -14,8 +14,8 @@ class DropZoneView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         let bg: NSColor = isDragHighlighted
-            ? NSColor(white: 0.18, alpha: 1)
-            : NSColor(white: 0.13, alpha: 1)
+            ? NSColor.controlBackgroundColor.blended(withFraction: 0.1, of: .white) ?? .controlBackgroundColor
+            : NSColor.controlBackgroundColor
         bg.setFill()
         bounds.fill()
 
@@ -25,8 +25,8 @@ class DropZoneView: NSView {
         let pattern: [CGFloat] = [6, 5]
         dash.setLineDash(pattern, count: 2, phase: 0)
         (isDragHighlighted
-            ? NSColor(red: 0.4, green: 0.7, blue: 1.0, alpha: 0.9)
-            : NSColor(white: 0.30, alpha: 1)
+            ? NSColor.controlAccentColor
+            : NSColor.separatorColor
         ).setStroke()
         dash.stroke()
 
@@ -34,8 +34,8 @@ class DropZoneView: NSView {
         let attrs: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 15, weight: .medium),
             .foregroundColor: isDragHighlighted
-                ? NSColor(red: 0.4, green: 0.7, blue: 1.0, alpha: 1.0)
-                : NSColor(white: 0.45, alpha: 1)
+                ? NSColor.controlAccentColor
+                : NSColor.secondaryLabelColor
         ]
         let size = (text as NSString).size(withAttributes: attrs)
         (text as NSString).draw(
@@ -90,6 +90,8 @@ class PreferencesController: NSObject, NSTextFieldDelegate {
     private let playModeLabel = NSTextField(labelWithString: "Order:")
     private let displayModePopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let displayModeLabel = NSTextField(labelWithString: "Display:")
+    private let appearanceLabel = NSTextField(labelWithString: "Theme:")
+    private let appearanceSegment = NSSegmentedControl(labels: ["System", "Dark", "Light"], trackingMode: .selectOne, target: nil, action: nil)
     private let applyButton = NSButton(title: "Apply", target: nil, action: nil)
     private let nextButton = NSButton(title: "Next", target: nil, action: nil)
     private let backButton = NSButton(title: "Back", target: nil, action: nil)
@@ -132,7 +134,7 @@ class PreferencesController: NSObject, NSTextFieldDelegate {
 
     override init() {
         window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 440, height: 390),
+            contentRect: NSRect(x: 0, y: 0, width: 440, height: 420),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
@@ -142,7 +144,6 @@ class PreferencesController: NSObject, NSTextFieldDelegate {
         window.title = "SpanWallpaper"
         window.center()
         window.isReleasedWhenClosed = false
-        window.backgroundColor = NSColor(white: 0.10, alpha: 1)
 
         let content = window.contentView!
         content.wantsLayer = true
@@ -150,6 +151,7 @@ class PreferencesController: NSObject, NSTextFieldDelegate {
         for v: NSView in [dropZone, pathLabel, browseButton, intervalLabel,
                           intervalPopup, playModeLabel, playModePopup,
                           displayModeLabel, displayModePopup,
+                          appearanceLabel, appearanceSegment,
                           filterToggle, filterContainer,
                           cacheToggle, cacheContainer,
                           applyButton, nextButton, backButton, retireButton, stopButton,
@@ -175,6 +177,7 @@ class PreferencesController: NSObject, NSTextFieldDelegate {
         setupSeparator()
         setupIntervalRow()
         setupDisplayRow()
+        setupAppearanceRow()
         setupFilterSection()
         setupCacheSection()
         setupActionRow()
@@ -200,7 +203,7 @@ class PreferencesController: NSObject, NSTextFieldDelegate {
 
     private func setupPathRow() {
         pathLabel.lineBreakMode = .byTruncatingMiddle
-        pathLabel.textColor = NSColor(white: 0.6, alpha: 1)
+        pathLabel.textColor = .secondaryLabelColor
         pathLabel.font = NSFont.systemFont(ofSize: 12)
         pathLabel.maximumNumberOfLines = 1
 
@@ -215,7 +218,7 @@ class PreferencesController: NSObject, NSTextFieldDelegate {
     }
 
     private func setupIntervalRow() {
-        intervalLabel.textColor = NSColor(white: 0.6, alpha: 1)
+        intervalLabel.textColor = .secondaryLabelColor
         intervalLabel.font = NSFont.systemFont(ofSize: 13)
 
         intervalPopup.removeAllItems()
@@ -225,7 +228,7 @@ class PreferencesController: NSObject, NSTextFieldDelegate {
         let savedInterval = RotationManager.shared.config?.intervalSeconds ?? AppConfig.defaultInterval
         intervalPopup.selectItem(at: IntervalPreset.indexForSeconds(savedInterval))
 
-        playModeLabel.textColor = NSColor(white: 0.6, alpha: 1)
+        playModeLabel.textColor = .secondaryLabelColor
         playModeLabel.font = NSFont.systemFont(ofSize: 13)
 
         playModePopup.removeAllItems()
@@ -238,7 +241,7 @@ class PreferencesController: NSObject, NSTextFieldDelegate {
     }
 
     private func setupDisplayRow() {
-        displayModeLabel.textColor = NSColor(white: 0.6, alpha: 1)
+        displayModeLabel.textColor = .secondaryLabelColor
         displayModeLabel.font = NSFont.systemFont(ofSize: 13)
 
         displayModePopup.removeAllItems()
@@ -255,11 +258,49 @@ class PreferencesController: NSObject, NSTextFieldDelegate {
         displayModePopup.action = #selector(displayModeChanged)
     }
 
+    private func setupAppearanceRow() {
+        appearanceLabel.textColor = .secondaryLabelColor
+        appearanceLabel.font = NSFont.systemFont(ofSize: 13)
+
+        let config = RotationManager.shared.config ?? AppConfig()
+        switch config.appearanceMode {
+        case .system: appearanceSegment.selectedSegment = 0
+        case .dark: appearanceSegment.selectedSegment = 1
+        case .light: appearanceSegment.selectedSegment = 2
+        }
+        appearanceSegment.target = self
+        appearanceSegment.action = #selector(appearanceChanged)
+        applyAppearance(config.appearanceMode)
+    }
+
+    @objc private func appearanceChanged() {
+        let mode: AppearanceMode
+        switch appearanceSegment.selectedSegment {
+        case 1: mode = .dark
+        case 2: mode = .light
+        default: mode = .system
+        }
+        applyAppearance(mode)
+        if RotationManager.shared.config == nil {
+            RotationManager.shared.config = AppConfig()
+        }
+        RotationManager.shared.config?.appearanceMode = mode
+        RotationManager.shared.config?.save()
+    }
+
+    private func applyAppearance(_ mode: AppearanceMode) {
+        switch mode {
+        case .system: window.appearance = nil
+        case .dark: window.appearance = NSAppearance(named: .darkAqua)
+        case .light: window.appearance = NSAppearance(named: .aqua)
+        }
+    }
+
     private func setupFilterSection() {
         filterToggle.isBordered = false
         filterToggle.setButtonType(.momentaryPushIn)
         filterToggle.font = NSFont.systemFont(ofSize: 13, weight: .medium)
-        filterToggle.contentTintColor = NSColor(white: 0.7, alpha: 1)
+        filterToggle.contentTintColor = .secondaryLabelColor
         filterToggle.alignment = .left
         filterToggle.target = self
         filterToggle.action = #selector(filterToggleTapped)
@@ -270,19 +311,20 @@ class PreferencesController: NSObject, NSTextFieldDelegate {
 
         recursiveCheckbox.target = self
         recursiveCheckbox.action = #selector(filterChanged)
+        recursiveCheckbox.contentTintColor = .secondaryLabelColor
 
         let dimLabels: [NSTextField] = [excludeLabel, excludePlusLabel, minSizeLabel, maxSizeLabel,
                                          minWidthSuffix, minHeightSuffix, maxWidthSuffix, maxHeightSuffix,
                                          minSizeX, maxSizeX]
         for label in dimLabels {
-            label.textColor = NSColor(white: 0.5, alpha: 1)
+            label.textColor = .tertiaryLabelColor
             label.font = NSFont.systemFont(ofSize: 12)
         }
 
         excludeFixedTag.font = NSFont.systemFont(ofSize: 12, weight: .medium)
-        excludeFixedTag.textColor = NSColor(white: 0.45, alpha: 1)
+        excludeFixedTag.textColor = .tertiaryLabelColor
         excludeFixedTag.drawsBackground = true
-        excludeFixedTag.backgroundColor = NSColor(white: 0.18, alpha: 1)
+        excludeFixedTag.backgroundColor = .quaternaryLabelColor
         excludeFixedTag.isBordered = false
         excludeFixedTag.isEditable = false
         excludeFixedTag.isSelectable = false
@@ -296,8 +338,8 @@ class PreferencesController: NSObject, NSTextFieldDelegate {
             field.font = NSFont.systemFont(ofSize: 12)
             field.isBordered = true
             field.drawsBackground = true
-            field.backgroundColor = NSColor(white: 0.15, alpha: 1)
-            field.textColor = .white
+            field.backgroundColor = .controlBackgroundColor
+            field.textColor = .labelColor
             field.focusRingType = .none
         }
 
@@ -387,7 +429,7 @@ class PreferencesController: NSObject, NSTextFieldDelegate {
         cacheToggle.isBordered = false
         cacheToggle.setButtonType(.momentaryPushIn)
         cacheToggle.font = NSFont.systemFont(ofSize: 13, weight: .medium)
-        cacheToggle.contentTintColor = NSColor(white: 0.7, alpha: 1)
+        cacheToggle.contentTintColor = .secondaryLabelColor
         cacheToggle.alignment = .left
         cacheToggle.target = self
         cacheToggle.action = #selector(cacheToggleTapped)
@@ -398,6 +440,7 @@ class PreferencesController: NSObject, NSTextFieldDelegate {
 
         autoClearCheckbox.target = self
         autoClearCheckbox.action = #selector(autoClearChanged)
+        autoClearCheckbox.contentTintColor = .secondaryLabelColor
         let config = RotationManager.shared.config ?? AppConfig()
         autoClearCheckbox.state = config.autoClearCache ? .on : .off
 
@@ -406,6 +449,7 @@ class PreferencesController: NSObject, NSTextFieldDelegate {
         cacheButton.bezelStyle = .rounded
         cacheButton.controlSize = .small
         cacheButton.font = NSFont.systemFont(ofSize: 11)
+        cacheButton.contentTintColor = .secondaryLabelColor
     }
 
     @objc private func cacheToggleTapped() {
@@ -517,7 +561,7 @@ class PreferencesController: NSObject, NSTextFieldDelegate {
     }
 
     private func setupStatusRow() {
-        statusLabel.textColor = NSColor(red: 0.4, green: 0.8, blue: 0.5, alpha: 0.9)
+        statusLabel.textColor = .systemGreen
         statusLabel.font = NSFont.systemFont(ofSize: 12)
         statusLabel.maximumNumberOfLines = 2
         statusLabel.lineBreakMode = .byWordWrapping
@@ -571,8 +615,16 @@ class PreferencesController: NSObject, NSTextFieldDelegate {
             displayModePopup.leadingAnchor.constraint(equalTo: displayModeLabel.trailingAnchor, constant: 6),
             displayModePopup.trailingAnchor.constraint(equalTo: c.trailingAnchor, constant: -m),
 
+            // Appearance row
+            appearanceLabel.topAnchor.constraint(equalTo: playModePopup.bottomAnchor, constant: 12),
+            appearanceLabel.leadingAnchor.constraint(equalTo: c.leadingAnchor, constant: m),
+            appearanceLabel.widthAnchor.constraint(equalToConstant: 52),
+
+            appearanceSegment.centerYAnchor.constraint(equalTo: appearanceLabel.centerYAnchor),
+            appearanceSegment.leadingAnchor.constraint(equalTo: appearanceLabel.trailingAnchor, constant: 6),
+
             // Filter toggle
-            filterToggle.topAnchor.constraint(equalTo: playModePopup.bottomAnchor, constant: 12),
+            filterToggle.topAnchor.constraint(equalTo: appearanceSegment.bottomAnchor, constant: 12),
             filterToggle.leadingAnchor.constraint(equalTo: c.leadingAnchor, constant: m),
 
             // Filter container
@@ -708,6 +760,12 @@ class PreferencesController: NSObject, NSTextFieldDelegate {
             case .fit: displayModePopup.selectItem(at: 1)
             case .fill: displayModePopup.selectItem(at: 2)
             }
+            switch cfg.appearanceMode {
+            case .system: appearanceSegment.selectedSegment = 0
+            case .dark: appearanceSegment.selectedSegment = 1
+            case .light: appearanceSegment.selectedSegment = 2
+            }
+            applyAppearance(cfg.appearanceMode)
         }
 
         if let path = selectedPath {
@@ -746,7 +804,7 @@ class PreferencesController: NSObject, NSTextFieldDelegate {
                 ].title.lowercased()
                 let modeName = cfg.playMode == .shuffle ? "shuffle" : "sequential"
                 statusLabel.stringValue = "Rotating \(images.count) images, \(presetTitle), \(modeName)"
-                statusLabel.textColor = NSColor(red: 0.4, green: 0.8, blue: 0.5, alpha: 0.9)
+                statusLabel.textColor = .systemGreen
             }
         } else {
             statusLabel.stringValue = ""
@@ -810,7 +868,7 @@ class PreferencesController: NSObject, NSTextFieldDelegate {
                     RotationManager.shared.config = cfg
                     DispatchQueue.main.async { [weak self] in
                         self?.statusLabel.stringValue = "Applied."
-                        self?.statusLabel.textColor = NSColor(white: 0.5, alpha: 1)
+                        self?.statusLabel.textColor = .tertiaryLabelColor
                     }
                 } catch {
                     DispatchQueue.main.async { showError(error.localizedDescription) }
