@@ -90,7 +90,7 @@ public func scanImages(in folder: URL, options: ScanOptions) -> [URL] {
 
 public func matchesExcludePattern(_ name: String, patterns: [String]) -> Bool {
     for pattern in patterns {
-        if fnmatch(pattern, name, 0) == 0 { return true }
+        if fnmatch(pattern, name, FNM_CASEFOLD) == 0 { return true }
     }
     return false
 }
