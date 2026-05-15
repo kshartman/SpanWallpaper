@@ -291,7 +291,7 @@ class PreferencesController: NSObject, NSTextFieldDelegate {
             field.delegate = self
         }
 
-        excludeField.placeholderString = "additional patterns"
+        excludeField.placeholderString = "temp, old-*"
         minWidthField.placeholderString = "width"
         minHeightField.placeholderString = "height"
         maxWidthField.placeholderString = "width"
