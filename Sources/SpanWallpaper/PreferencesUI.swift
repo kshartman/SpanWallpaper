@@ -125,10 +125,27 @@ class PreferencesController: NSObject, NSTextFieldDelegate {
     private let autoClearCheckbox = NSButton(checkboxWithTitle: "Auto-clear wallpaper cache on rotation", target: nil, action: nil)
     private let cacheButton = NSButton(title: "Clear Cache Now", target: nil, action: nil)
 
+    private let displaysToggle = NSButton(title: "\u{25B6}  Displays", target: nil, action: nil)
+    private let displaysContainer = NSView()
+    private let display1Label = NSTextField(labelWithString: "1:")
+    private let display1Path = NSTextField(labelWithString: "Not set")
+    private let display1Button = NSButton(title: "Choose...", target: nil, action: nil)
+    private let display1Clear = NSButton(title: "\u{2715}", target: nil, action: nil)
+    private let display2Label = NSTextField(labelWithString: "2:")
+    private let display2Path = NSTextField(labelWithString: "Not set")
+    private let display2Button = NSButton(title: "Choose...", target: nil, action: nil)
+    private let display2Clear = NSButton(title: "\u{2715}", target: nil, action: nil)
+    private let display3Label = NSTextField(labelWithString: "3:")
+    private let display3Path = NSTextField(labelWithString: "Not set")
+    private let display3Button = NSButton(title: "Choose...", target: nil, action: nil)
+    private let display3Clear = NSButton(title: "\u{2715}", target: nil, action: nil)
+
     private var filtersExpanded = false
     private var cacheExpanded = false
+    private var displaysExpanded = false
     private var filterContainerHeight: NSLayoutConstraint!
     private var cacheContainerHeight: NSLayoutConstraint!
+    private var displaysContainerHeight: NSLayoutConstraint!
     private var selectedPath: String?
     private var selectedIsFolder = false
 
@@ -154,6 +171,7 @@ class PreferencesController: NSObject, NSTextFieldDelegate {
                           appearanceLabel, appearanceSegment,
                           filterToggle, filterContainer,
                           cacheToggle, cacheContainer,
+                          displaysToggle, displaysContainer,
                           applyButton, nextButton, backButton, retireButton, stopButton,
                           statusLabel, separator] {
             v.translatesAutoresizingMaskIntoConstraints = false
@@ -172,6 +190,13 @@ class PreferencesController: NSObject, NSTextFieldDelegate {
             cacheContainer.addSubview(v)
         }
 
+        for v: NSView in [display1Label, display1Path, display1Button, display1Clear,
+                          display2Label, display2Path, display2Button, display2Clear,
+                          display3Label, display3Path, display3Button, display3Clear] {
+            v.translatesAutoresizingMaskIntoConstraints = false
+            displaysContainer.addSubview(v)
+        }
+
         setupDropZone()
         setupPathRow()
         setupSeparator()
@@ -180,6 +205,7 @@ class PreferencesController: NSObject, NSTextFieldDelegate {
         setupAppearanceRow()
         setupFilterSection()
         setupCacheSection()
+        setupDisplaysSection()
         setupActionRow()
         setupStatusRow()
         layoutConstraints()
@@ -535,6 +561,141 @@ class PreferencesController: NSObject, NSTextFieldDelegate {
         NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")!)
     }
 
+    private func setupDisplaysSection() {
+        displaysToggle.isBordered = false
+        displaysToggle.setButtonType(.momentaryPushIn)
+        displaysToggle.font = NSFont.systemFont(ofSize: 13, weight: .medium)
+        displaysToggle.contentTintColor = .secondaryLabelColor
+        displaysToggle.alignment = .left
+        displaysToggle.target = self
+        displaysToggle.action = #selector(displaysToggleTapped)
+
+        displaysContainer.isHidden = true
+        displaysContainerHeight = displaysContainer.heightAnchor.constraint(equalToConstant: 0)
+        displaysContainerHeight.isActive = true
+
+        let labels = [display1Label, display2Label, display3Label]
+        let paths = [display1Path, display2Path, display3Path]
+        let buttons = [display1Button, display2Button, display3Button]
+        let clears = [display1Clear, display2Clear, display3Clear]
+
+        for label in labels {
+            label.textColor = .secondaryLabelColor
+            label.font = NSFont.systemFont(ofSize: 12)
+        }
+        for path in paths {
+            path.textColor = .tertiaryLabelColor
+            path.font = NSFont.systemFont(ofSize: 11)
+            path.lineBreakMode = .byTruncatingMiddle
+            path.maximumNumberOfLines = 1
+        }
+        for btn in buttons {
+            btn.bezelStyle = .rounded
+            btn.controlSize = .small
+            btn.font = NSFont.systemFont(ofSize: 11)
+            btn.target = self
+            btn.setContentHuggingPriority(.required, for: .horizontal)
+            btn.setContentCompressionResistancePriority(.required, for: .horizontal)
+        }
+        for path in paths {
+            path.setContentHuggingPriority(.defaultLow, for: .horizontal)
+            path.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        }
+        for btn in clears {
+            btn.isBordered = false
+            btn.font = NSFont.systemFont(ofSize: 12)
+            btn.contentTintColor = .tertiaryLabelColor
+            btn.target = self
+        }
+
+        display1Button.action = #selector(display1Browse)
+        display2Button.action = #selector(display2Browse)
+        display3Button.action = #selector(display3Browse)
+        display1Clear.action = #selector(display1ClearTapped)
+        display2Clear.action = #selector(display2ClearTapped)
+        display3Clear.action = #selector(display3ClearTapped)
+
+        syncDisplaysFolders()
+    }
+
+    @objc private func displaysToggleTapped() {
+        displaysExpanded = !displaysExpanded
+        let expandedHeight: CGFloat = 90
+        let delta = displaysExpanded ? expandedHeight : -expandedHeight
+
+        displaysContainer.isHidden = !displaysExpanded
+        displaysContainerHeight.constant = displaysExpanded ? expandedHeight : 0
+
+        var frame = window.frame
+        frame.size.height += delta
+        frame.origin.y -= delta
+        window.setFrame(frame, display: true, animate: true)
+        updateDisplaysToggleTitle()
+    }
+
+    private func updateDisplaysToggleTitle() {
+        let arrow = displaysExpanded ? "\u{25BC}" : "\u{25B6}"
+        let config = RotationManager.shared.config ?? AppConfig()
+        let count = config.monitorFolders?.values.filter({ !$0.isEmpty }).count ?? 0
+        let suffix = count > 0 ? " (\(count) set)" : ""
+        displaysToggle.title = "\(arrow)  Displays\(suffix)"
+    }
+
+    private func syncDisplaysFolders() {
+        let config = RotationManager.shared.config ?? AppConfig()
+        let folders = config.monitorFolders ?? [:]
+
+        let paths = [display1Path, display2Path, display3Path]
+        let clears = [display1Clear, display2Clear, display3Clear]
+
+        for (i, key) in ["1", "2", "3"].enumerated() {
+            if let folder = folders[key], !folder.isEmpty {
+                paths[i].stringValue = (folder as NSString).lastPathComponent
+                paths[i].toolTip = folder
+                clears[i].isHidden = false
+            } else {
+                paths[i].stringValue = "Not set"
+                paths[i].toolTip = nil
+                clears[i].isHidden = true
+            }
+        }
+        updateDisplaysToggleTitle()
+    }
+
+    private func browseForDisplayFolder(count: Int) {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.message = "Choose folder for \(count)-display configuration"
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        var config = RotationManager.shared.config ?? AppConfig()
+        var folders = config.monitorFolders ?? [:]
+        folders[String(count)] = url.path
+        config.monitorFolders = folders
+        RotationManager.shared.config = config
+        config.save()
+        syncDisplaysFolders()
+    }
+
+    private func clearDisplayFolder(count: Int) {
+        var config = RotationManager.shared.config ?? AppConfig()
+        var folders = config.monitorFolders ?? [:]
+        folders.removeValue(forKey: String(count))
+        if folders.isEmpty { config.monitorFolders = nil } else { config.monitorFolders = folders }
+        RotationManager.shared.config = config
+        config.save()
+        syncDisplaysFolders()
+    }
+
+    @objc private func display1Browse() { browseForDisplayFolder(count: 1) }
+    @objc private func display2Browse() { browseForDisplayFolder(count: 2) }
+    @objc private func display3Browse() { browseForDisplayFolder(count: 3) }
+    @objc private func display1ClearTapped() { clearDisplayFolder(count: 1) }
+    @objc private func display2ClearTapped() { clearDisplayFolder(count: 2) }
+    @objc private func display3ClearTapped() { clearDisplayFolder(count: 3) }
+
     private func setupActionRow() {
         applyButton.target = self
         applyButton.action = #selector(applyTapped)
@@ -718,8 +879,65 @@ class PreferencesController: NSObject, NSTextFieldDelegate {
             cacheButton.topAnchor.constraint(equalTo: autoClearCheckbox.bottomAnchor, constant: 8),
             cacheButton.leadingAnchor.constraint(equalTo: cacheContainer.leadingAnchor),
 
+            // Displays toggle
+            displaysToggle.topAnchor.constraint(equalTo: cacheContainer.bottomAnchor, constant: 8),
+            displaysToggle.leadingAnchor.constraint(equalTo: c.leadingAnchor, constant: m),
+
+            // Displays container
+            displaysContainer.topAnchor.constraint(equalTo: displaysToggle.bottomAnchor, constant: 8),
+            displaysContainer.leadingAnchor.constraint(equalTo: c.leadingAnchor, constant: m + 12),
+            displaysContainer.trailingAnchor.constraint(equalTo: c.trailingAnchor, constant: -m),
+
+            // Displays row 1: label → button → path → clear
+            display1Label.topAnchor.constraint(equalTo: displaysContainer.topAnchor, constant: 4),
+            display1Label.leadingAnchor.constraint(equalTo: displaysContainer.leadingAnchor),
+            display1Label.widthAnchor.constraint(equalToConstant: 18),
+
+            display1Button.centerYAnchor.constraint(equalTo: display1Label.centerYAnchor),
+            display1Button.leadingAnchor.constraint(equalTo: display1Label.trailingAnchor, constant: 4),
+
+            display1Path.centerYAnchor.constraint(equalTo: display1Label.centerYAnchor),
+            display1Path.leadingAnchor.constraint(equalTo: display1Button.trailingAnchor, constant: 6),
+            display1Path.trailingAnchor.constraint(equalTo: display1Clear.leadingAnchor, constant: -4),
+
+            display1Clear.centerYAnchor.constraint(equalTo: display1Label.centerYAnchor),
+            display1Clear.trailingAnchor.constraint(equalTo: displaysContainer.trailingAnchor),
+            display1Clear.widthAnchor.constraint(equalToConstant: 20),
+
+            // Displays row 2
+            display2Label.topAnchor.constraint(equalTo: display1Label.bottomAnchor, constant: 8),
+            display2Label.leadingAnchor.constraint(equalTo: displaysContainer.leadingAnchor),
+            display2Label.widthAnchor.constraint(equalToConstant: 18),
+
+            display2Button.centerYAnchor.constraint(equalTo: display2Label.centerYAnchor),
+            display2Button.leadingAnchor.constraint(equalTo: display2Label.trailingAnchor, constant: 4),
+
+            display2Path.centerYAnchor.constraint(equalTo: display2Label.centerYAnchor),
+            display2Path.leadingAnchor.constraint(equalTo: display2Button.trailingAnchor, constant: 6),
+            display2Path.trailingAnchor.constraint(equalTo: display2Clear.leadingAnchor, constant: -4),
+
+            display2Clear.centerYAnchor.constraint(equalTo: display2Label.centerYAnchor),
+            display2Clear.trailingAnchor.constraint(equalTo: displaysContainer.trailingAnchor),
+            display2Clear.widthAnchor.constraint(equalToConstant: 20),
+
+            // Displays row 3
+            display3Label.topAnchor.constraint(equalTo: display2Label.bottomAnchor, constant: 8),
+            display3Label.leadingAnchor.constraint(equalTo: displaysContainer.leadingAnchor),
+            display3Label.widthAnchor.constraint(equalToConstant: 18),
+
+            display3Button.centerYAnchor.constraint(equalTo: display3Label.centerYAnchor),
+            display3Button.leadingAnchor.constraint(equalTo: display3Label.trailingAnchor, constant: 4),
+
+            display3Path.centerYAnchor.constraint(equalTo: display3Label.centerYAnchor),
+            display3Path.leadingAnchor.constraint(equalTo: display3Button.trailingAnchor, constant: 6),
+            display3Path.trailingAnchor.constraint(equalTo: display3Clear.leadingAnchor, constant: -4),
+
+            display3Clear.centerYAnchor.constraint(equalTo: display3Label.centerYAnchor),
+            display3Clear.trailingAnchor.constraint(equalTo: displaysContainer.trailingAnchor),
+            display3Clear.widthAnchor.constraint(equalToConstant: 20),
+
             // Action row
-            stopButton.topAnchor.constraint(equalTo: cacheContainer.bottomAnchor, constant: 16),
+            stopButton.topAnchor.constraint(equalTo: displaysContainer.bottomAnchor, constant: 16),
             stopButton.leadingAnchor.constraint(equalTo: c.leadingAnchor, constant: m),
 
             retireButton.centerYAnchor.constraint(equalTo: stopButton.centerYAnchor),

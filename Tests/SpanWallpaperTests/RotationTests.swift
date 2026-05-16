@@ -78,6 +78,20 @@ final class AppConfigTests: XCTestCase {
         XCTAssertEqual(decoded.maxWidth, 7680)
         XCTAssertEqual(decoded.maxHeight, 4320)
     }
+
+    func testMonitorFoldersRoundTrip() throws {
+        let folders = ["1": "/path/single", "2": "/path/dual"]
+        let config = AppConfig(monitorFolders: folders)
+        let data = try JSONEncoder().encode(config)
+        let decoded = try JSONDecoder().decode(AppConfig.self, from: data)
+        XCTAssertEqual(decoded.monitorFolders, folders)
+    }
+
+    func testMonitorFoldersDefaultNil() throws {
+        let json = "{}".data(using: .utf8)!
+        let config = try JSONDecoder().decode(AppConfig.self, from: json)
+        XCTAssertNil(config.monitorFolders)
+    }
 }
 
 // MARK: - Legacy RotationConfig (migration source)

@@ -37,6 +37,7 @@ public struct AppConfig: Codable, Equatable {
     public var appearanceMode: AppearanceMode
     public var autoClearCache: Bool
     public var cacheAccessConfirmed: Bool
+    public var monitorFolders: [String: String]?
 
     public static let defaultInterval = 86400
 
@@ -55,7 +56,8 @@ public struct AppConfig: Codable, Equatable {
         displayMode: DisplayMode = .span,
         appearanceMode: AppearanceMode = .system,
         autoClearCache: Bool = false,
-        cacheAccessConfirmed: Bool = false
+        cacheAccessConfirmed: Bool = false,
+        monitorFolders: [String: String]? = nil
     ) {
         self.folderPath = folderPath
         self.singleImagePath = singleImagePath
@@ -72,6 +74,7 @@ public struct AppConfig: Codable, Equatable {
         self.appearanceMode = appearanceMode
         self.autoClearCache = autoClearCache
         self.cacheAccessConfirmed = cacheAccessConfirmed
+        self.monitorFolders = monitorFolders
     }
 
     public init(from decoder: Decoder) throws {
@@ -91,6 +94,7 @@ public struct AppConfig: Codable, Equatable {
         appearanceMode = try c.decodeIfPresent(AppearanceMode.self, forKey: .appearanceMode) ?? .system
         autoClearCache = try c.decodeIfPresent(Bool.self, forKey: .autoClearCache) ?? false
         cacheAccessConfirmed = try c.decodeIfPresent(Bool.self, forKey: .cacheAccessConfirmed) ?? false
+        monitorFolders = try c.decodeIfPresent([String: String].self, forKey: .monitorFolders)
     }
 }
 

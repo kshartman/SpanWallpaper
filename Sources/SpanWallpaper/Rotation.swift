@@ -271,6 +271,31 @@ class RotationManager {
     }
 
 
+    // MARK: - Monitor-count folder switching
+
+    func switchFolderIfNeeded(displayCount: Int) {
+        guard let config = config,
+              let folders = config.monitorFolders,
+              let folder = folders[String(displayCount)],
+              !folder.isEmpty,
+              folder != config.folderPath,
+              FileManager.default.fileExists(atPath: folder) else { return }
+
+        Log.info("Display count changed to \(displayCount), switching to: \(folder)")
+        self.config?.folderPath = folder
+        self.config?.lastImagePath = nil
+        self.config?.save()
+        FolderImageCache.shared.invalidate()
+        resetShuffle()
+        applyNext()
+
+        if isActive {
+            WallpaperSetter.writeSkipMarker()
+            uninstallLaunchAgent()
+            installLaunchAgent()
+        }
+    }
+
     // MARK: - Shuffle
 
     func resetShuffle() {

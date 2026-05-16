@@ -61,8 +61,25 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func handleRotateTick() {
         if WallpaperSetter.consumeSkipMarker() { return }
-        guard let config = AppConfig.load(), let folderPath = config.folderPath else { return }
-        let folder = URL(fileURLWithPath: folderPath)
+        guard var config = AppConfig.load(), let folderPath = config.folderPath else { return }
+
+        let displayCount = NSScreen.screens.count
+        let effectiveFolderPath: String
+        if let folders = config.monitorFolders,
+           let override = folders[String(displayCount)],
+           !override.isEmpty,
+           FileManager.default.fileExists(atPath: override) {
+            effectiveFolderPath = override
+            if override != folderPath {
+                config.folderPath = override
+                config.lastImagePath = nil
+                config.save()
+            }
+        } else {
+            effectiveFolderPath = folderPath
+        }
+
+        let folder = URL(fileURLWithPath: effectiveFolderPath)
         guard FileManager.default.isReadableFile(atPath: folder.path) else {
             Log.info("Folder unavailable: \(folderPath) -- skipping tick")
             return
@@ -169,6 +186,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         isReapplying = true
         Log.info("Re-applying wallpaper after \(reason)...")
         DispatchQueue.global(qos: .userInitiated).async {
+            let displayCount = NSScreen.screens.count
+            RotationManager.shared.switchFolderIfNeeded(displayCount: displayCount)
             RotationManager.shared.reapplyCurrent()
             if let fp = try? ScreenLayout.detect().fingerprint {
                 DispatchQueue.main.async { [weak self] in
@@ -177,6 +196,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
             DispatchQueue.main.async { [weak self] in
                 self?.isReapplying = false
+                self?.prefsController?.syncUI()
             }
         }
     }
