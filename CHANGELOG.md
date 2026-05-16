@@ -1,5 +1,20 @@
 # Changelog
 
+## 2.2.0 — 2026-05-16
+
+Per-display folder switching and distributable installer.
+
+### Features
+- **Auto-switch folder by display count**: optionally assign different image folders to 1/2/3-display configurations -- on monitor connect/disconnect (or laptop lid open/close), the app automatically switches to the matching folder and applies a new wallpaper
+- **Distributable .pkg installer**: `./build-pkg.sh` produces a signed macOS installer package that installs to `/Applications` without requiring Xcode Command Line Tools on the target machine
+
+### Under the hood
+- `AppConfig` gains `monitorFolders: [String: String]?` (keys "1"/"2"/"3", values are folder paths; backward-compatible default: nil)
+- `RotationManager.switchFolderIfNeeded(displayCount:)` checks config on screen change and switches folder + resets shuffle + reinstalls launchd agent
+- `handleRotateTick()` also respects monitor folder overrides for launchd ticks
+- Collapsible "Displays" section in preferences UI with per-count folder pickers
+- 61 unit tests (up from 59)
+
 ## 2.1.2 — 2026-05-15
 
 Rotation race condition fix.

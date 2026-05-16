@@ -12,6 +12,9 @@ SpanWallpaper -- a native macOS wallpaper manager (Swift, AppKit) with three dis
 # Full build + install to /Applications + Desktop alias
 ./setup.sh
 
+# Build distributable .pkg installer (output: dist/SpanWallpaper-<version>.pkg)
+./build-pkg.sh
+
 # Requires Xcode Command Line Tools (xcode-select --install)
 # Compile only (no install):
 swift build -c release
@@ -29,18 +32,18 @@ SPM project with a library target (`SpanWallpaperLib`) for testable pure functio
 ## Architecture
 
 SPM package with three targets:
-- `SpanWallpaperLib` (`Sources/SpanWallpaperLib/`) -- pure functions: `AppConfig`/`RotationConfig` (Codable), `PlayMode`, `DisplayMode`, `AppearanceMode`, `pickNextImage`, `ScanOptions`, `scanImages`, `imageDimensions`, `matchesExcludePattern`, `IntervalPreset`, `SliceFileMatch`, `imageExtensions`, `WallpaperCache` (FDA check, cache size, purge). No AppKit dependency.
+- `SpanWallpaperLib` (`Sources/SpanWallpaperLib/`) -- pure functions: `AppConfig`/`RotationConfig` (Codable), `PlayMode`, `DisplayMode`, `AppearanceMode`, `pickNextImage`, `ScanOptions`, `scanImages`, `imageDimensions`, `matchesExcludePattern`, `IntervalPreset`, `SliceFileMatch`, `imageExtensions`, `WallpaperCache` (FDA check, cache size, purge), `monitorFolders` (per-display-count folder mapping). No AppKit dependency.
 - `SpanWallpaper` (`Sources/SpanWallpaper/`) -- the app, split into 8 files: `main.swift` (entry point), `AppDelegate.swift`, `ScreenLayout.swift`, `ImagePipeline.swift`, `WallpaperSetter.swift`, `Rotation.swift`, `PreferencesUI.swift`, `Utilities.swift`.
-- `SpanWallpaperTests` (`Tests/SpanWallpaperTests/`) -- XCTest suite for the lib (59 tests).
+- `SpanWallpaperTests` (`Tests/SpanWallpaperTests/`) -- XCTest suite for the lib (61 tests).
 
 Key components:
 
 - **ScreenLayout** -- detects all displays, computes a unified point-space canvas, produces `ScreenSlice` structs with per-screen point origins and native pixel sizes. Handles mixed-DPI setups by doing layout math in points and output in pixels.
 - **ImagePipeline** -- loads images via `CGImageSource` (handles EXIF orientation via CoreImage), computes aspect-fill crop rect, renders per-screen slices at native resolution, writes JPEG atomically (temp file + rename). Only used for Span mode; Fit/Fill bypass the pipeline entirely.
 - **WallpaperSetter** -- applies slice files (Span) or original images (Fit/Fill) via `NSWorkspace.setDesktopImageURL`. Caches displayID-to-file mapping for fast Space-change reapply. Manages slice cleanup and cross-process locking.
-- **RotationManager** -- manages folder rotation with shuffle (Fisher-Yates in-memory queue) or sequential play. Persists state to `config.json`, installs/uninstalls a launchd agent for reboot persistence. Handles retire workflow (move image to `retired/` subfolder).
+- **RotationManager** -- manages folder rotation with shuffle (Fisher-Yates in-memory queue) or sequential play. Persists state to `config.json`, installs/uninstalls a launchd agent for reboot persistence. Handles retire workflow (move image to `retired/` subfolder). Supports per-display-count folder switching (`switchFolderIfNeeded`).
 - **Scanner** (lib) -- configurable image scanner with recursive traversal, fnmatch-based exclusion patterns, and optional size filtering via `CGImageSourceCopyPropertiesAtIndex`.
-- **PreferencesController** -- AppKit UI with drop zone, file picker, interval/play-mode/display-mode/appearance selectors, collapsible filter and cache sections, retire/next/stop buttons. Theme switcher (System/Dark/Light) via `NSAppearance`. Cache section requires FDA (Full Disk Access) to manage the macOS wallpaper cache. Built programmatically (no XIB/storyboard).
+- **PreferencesController** -- AppKit UI with drop zone, file picker, interval/play-mode/display-mode/appearance selectors, collapsible filter, cache, and displays sections, retire/next/stop buttons. Theme switcher (System/Dark/Light) via `NSAppearance`. Cache section requires FDA (Full Disk Access) to manage the macOS wallpaper cache. Displays section configures per-monitor-count folder overrides. Built programmatically (no XIB/storyboard).
 - **AppDelegate** -- entry point routing: `--rotate` flag = one-shot for launchd, CLI args = direct apply, no args = show preferences. Registers observers for screen changes, wake, and Space switches to auto-reapply. Handles window reopen on dock icon click.
 
 ## Runtime Paths
@@ -72,6 +75,7 @@ Key components:
 - **Cache management** requires Full Disk Access (FDA) because the macOS wallpaper cache lives inside `~/Library/Containers/com.apple.wallpaper.agent/`. FDA is checked via `TCC.db` readability probe — no TCC prompt unless the user explicitly interacts with the cache section. Auto-purge only runs from the launchd `--rotate` tick, never during interactive Apply/Next/Back.
 - **Code signing** (`setup.sh`) uses the first available signing identity for persistent TCC grants. Self-signed certs require manual FDA setup; Apple Developer certs auto-appear in the FDA list.
 - **Appearance** uses `NSAppearance` on the window (not app-wide) with semantic AppKit colors (`.secondaryLabelColor`, `.controlBackgroundColor`, etc.) so all controls adapt automatically to System/Dark/Light. The `appearanceMode` field persists in `config.json` (backward-compatible default: `system`).
+- **Per-display-count folder switching**: `AppConfig.monitorFolders` maps display count ("1"/"2"/"3") to folder paths. On screen-change notification, `switchFolderIfNeeded` checks `NSScreen.screens.count`, and if an override exists for that count, switches folder, resets shuffle, applies, and reinstalls the launchd agent. The launchd `--rotate` tick also respects the mapping. Closed-laptop case is automatic — macOS only reports active displays.
 
 ## Skill routing
 

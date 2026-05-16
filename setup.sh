@@ -11,6 +11,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 APP_NAME="SpanWallpaper"
+VERSION=$(cat "$SCRIPT_DIR/VERSION")
 APP="/Applications/$APP_NAME.app"
 
 WORK="$(mktemp -d -t spanwallpaper-build.XXXXXX)"
@@ -39,7 +40,7 @@ mkdir -p "$BUNDLE/Contents/Resources"
 cp "$WORK/$APP_NAME" "$BUNDLE/Contents/MacOS/$APP_NAME"
 chmod +x "$BUNDLE/Contents/MacOS/$APP_NAME"
 
-cat > "$BUNDLE/Contents/Info.plist" <<'PLIST_EOF'
+cat > "$BUNDLE/Contents/Info.plist" <<PLIST_EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -56,9 +57,9 @@ cat > "$BUNDLE/Contents/Info.plist" <<'PLIST_EOF'
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleVersion</key>
-    <string>2.1.0</string>
+    <string>$VERSION</string>
     <key>CFBundleShortVersionString</key>
-    <string>2.1.0</string>
+    <string>$VERSION</string>
     <key>CFBundleIconFile</key>
     <string>AppIcon</string>
     <key>NSHighResolutionCapable</key>
