@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.3.1 — 2026-05-19
+
+Bug fixes for retire and pkg installer.
+
+### Bug fixes
+- **Retire advances correctly**: retire no longer resets to the first image -- pre-computes the successor before moving the file to `retired/`
+- **Pkg installer permissions**: fixed "damaged or incomplete" error on install -- explicit 755/644 permissions, `ditto --norsrc` to strip resource forks, `pkgbuild --filter` for junk files
+
 ## 2.3.0 — 2026-05-19
 
 Debug logging and config architecture cleanup.
