@@ -19,7 +19,7 @@ Per-display folder switching and distributable installer.
 
 ### Features
 - **Auto-switch folder by display count**: optionally assign different image folders to 1/2/3-display configurations -- on monitor connect/disconnect (or laptop lid open/close), the app automatically switches to the matching folder and applies a new wallpaper
-- **Distributable .pkg installer**: `./build-pkg.sh` produces a signed macOS installer package that installs to `/Applications` without requiring Xcode Command Line Tools on the target machine
+- **Distributable .pkg installer**: `./build-pkg.sh` produces an unsigned macOS installer package for dev/test; `./build-pkg.sh --sign` signs with Developer ID and notarizes for release
 
 ### Under the hood
 - `AppConfig` gains `monitorFolders: [String: String]?` (keys "1"/"2"/"3", values are folder paths; backward-compatible default: nil)

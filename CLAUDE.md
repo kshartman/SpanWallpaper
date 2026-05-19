@@ -13,7 +13,8 @@ SpanWallpaper -- a native macOS wallpaper manager (Swift, AppKit) with three dis
 ./setup.sh
 
 # Build distributable .pkg installer (output: dist/SpanWallpaper-<version>.pkg)
-./build-pkg.sh
+./build-pkg.sh            # unsigned (dev/test)
+./build-pkg.sh --sign     # Developer ID signed + notarized (release)
 
 # Requires Xcode Command Line Tools (xcode-select --install)
 # Compile only (no install):
