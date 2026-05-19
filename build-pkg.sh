@@ -38,7 +38,6 @@ BUNDLE="$WORK/$APP_NAME.app"
 mkdir -p "$BUNDLE/Contents/MacOS"
 mkdir -p "$BUNDLE/Contents/Resources"
 cp "$SPM_BIN" "$BUNDLE/Contents/MacOS/$APP_NAME"
-chmod +x "$BUNDLE/Contents/MacOS/$APP_NAME"
 
 cat > "$BUNDLE/Contents/Info.plist" <<PLIST_EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -237,14 +236,19 @@ done
 /usr/bin/iconutil -c icns "$ICONSET" -o "$BUNDLE/Contents/Resources/AppIcon.icns"
 
 # ---------------------------------------------------------------------------
-# 4) Code sign
+# 4) Strip extended attributes, set permissions, code sign
 # ---------------------------------------------------------------------------
+xattr -cr "$BUNDLE"
+find "$BUNDLE" -type d -exec chmod 755 {} +
+find "$BUNDLE" -type f -exec chmod 644 {} +
+chmod 755 "$BUNDLE/Contents/MacOS/$APP_NAME"
+
 if $SIGN; then
     echo "Unlocking keychain (enter password in popup if prompted)..."
     security unlock-keychain ~/Library/Keychains/login.keychain-db
 
     APP_SIGN_ID="Developer ID Application: Shane Hartman (5B3W3FNBS5)"
-    codesign --force --options runtime --sign "$APP_SIGN_ID" "$BUNDLE" 2>&1
+    codesign --force --options runtime --timestamp --sign "$APP_SIGN_ID" "$BUNDLE" 2>&1
     echo "Signed app with: $APP_SIGN_ID"
 else
     SIGN_ID=$(security find-identity -v -p codesigning 2>/dev/null | head -1 | sed 's/.*"\(.*\)".*/\1/')
@@ -266,7 +270,7 @@ fi
 
 PAYLOAD="$WORK/payload"
 mkdir -p "$PAYLOAD/Applications"
-cp -R "$BUNDLE" "$PAYLOAD/Applications/"
+ditto --norsrc "$BUNDLE" "$PAYLOAD/Applications/$APP_NAME.app"
 
 PKG_SIGN_ARGS=()
 if $SIGN; then
@@ -278,6 +282,8 @@ fi
     --identifier "com.shartman.SpanWallpaper" \
     --version "$VERSION" \
     --install-location "/" \
+    --filter '\.DS_Store' \
+    --filter '\._' \
     ${PKG_SIGN_ARGS[@]+"${PKG_SIGN_ARGS[@]}"} \
     "$PKG_OUT"
 
