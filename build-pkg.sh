@@ -258,7 +258,11 @@ fi
 # 5) Build .pkg
 # ---------------------------------------------------------------------------
 mkdir -p "$SCRIPT_DIR/dist"
-PKG_OUT="$SCRIPT_DIR/dist/$APP_NAME-$VERSION.pkg"
+if $SIGN; then
+    PKG_OUT="$SCRIPT_DIR/dist/$APP_NAME-$VERSION.pkg"
+else
+    PKG_OUT="$SCRIPT_DIR/dist/$APP_NAME-$VERSION-test.pkg"
+fi
 
 PAYLOAD="$WORK/payload"
 mkdir -p "$PAYLOAD/Applications"
@@ -274,7 +278,7 @@ fi
     --identifier "com.shartman.SpanWallpaper" \
     --version "$VERSION" \
     --install-location "/" \
-    "${PKG_SIGN_ARGS[@]}" \
+    ${PKG_SIGN_ARGS[@]+"${PKG_SIGN_ARGS[@]}"} \
     "$PKG_OUT"
 
 echo ""

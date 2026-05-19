@@ -19,9 +19,8 @@ Compiles the app, generates an icon, code-signs it, installs to `/Applications/S
 **Build the .pkg yourself:**
 
 ```bash
-./build-pkg.sh            # unsigned (dev/test)
-./build-pkg.sh --sign     # Developer ID signed + notarized (release)
-# Output: dist/SpanWallpaper-<version>.pkg
+./build-pkg.sh            # -> dist/SpanWallpaper-<version>-test.pkg (unsigned)
+./build-pkg.sh --sign     # -> dist/SpanWallpaper-<version>.pkg (signed + notarized)
 ```
 
 ## Usage
