@@ -127,6 +127,7 @@ class PreferencesController: NSObject, NSTextFieldDelegate {
 
     private let displaysToggle = NSButton(title: "\u{25B6}  Displays", target: nil, action: nil)
     private let displaysContainer = NSView()
+    private let debugCheckbox = NSButton(checkboxWithTitle: "Debug log", target: nil, action: nil)
     private let display1Label = NSTextField(labelWithString: "1:")
     private let display1Path = NSTextField(labelWithString: "Not set")
     private let display1Button = NSButton(title: "Choose...", target: nil, action: nil)
@@ -172,6 +173,7 @@ class PreferencesController: NSObject, NSTextFieldDelegate {
                           filterToggle, filterContainer,
                           cacheToggle, cacheContainer,
                           displaysToggle, displaysContainer,
+                          debugCheckbox,
                           applyButton, nextButton, backButton, retireButton, stopButton,
                           statusLabel, separator] {
             v.translatesAutoresizingMaskIntoConstraints = false
@@ -206,6 +208,7 @@ class PreferencesController: NSObject, NSTextFieldDelegate {
         setupFilterSection()
         setupCacheSection()
         setupDisplaysSection()
+        setupDebugRow()
         setupActionRow()
         setupStatusRow()
         layoutConstraints()
@@ -696,6 +699,22 @@ class PreferencesController: NSObject, NSTextFieldDelegate {
     @objc private func display2ClearTapped() { clearDisplayFolder(count: 2) }
     @objc private func display3ClearTapped() { clearDisplayFolder(count: 3) }
 
+    private func setupDebugRow() {
+        debugCheckbox.target = self
+        debugCheckbox.action = #selector(debugToggled)
+        debugCheckbox.contentTintColor = .tertiaryLabelColor
+        debugCheckbox.font = NSFont.systemFont(ofSize: 11)
+        let config = RotationManager.shared.config ?? AppConfig()
+        debugCheckbox.state = config.debugLog ? .on : .off
+    }
+
+    @objc private func debugToggled() {
+        var config = RotationManager.shared.config ?? AppConfig()
+        config.debugLog = debugCheckbox.state == .on
+        RotationManager.shared.config = config
+        config.save()
+    }
+
     private func setupActionRow() {
         applyButton.target = self
         applyButton.action = #selector(applyTapped)
@@ -936,8 +955,12 @@ class PreferencesController: NSObject, NSTextFieldDelegate {
             display3Clear.trailingAnchor.constraint(equalTo: displaysContainer.trailingAnchor),
             display3Clear.widthAnchor.constraint(equalToConstant: 20),
 
+            // Debug checkbox
+            debugCheckbox.topAnchor.constraint(equalTo: displaysContainer.bottomAnchor, constant: 10),
+            debugCheckbox.trailingAnchor.constraint(equalTo: c.trailingAnchor, constant: -m),
+
             // Action row
-            stopButton.topAnchor.constraint(equalTo: displaysContainer.bottomAnchor, constant: 16),
+            stopButton.topAnchor.constraint(equalTo: debugCheckbox.bottomAnchor, constant: 10),
             stopButton.leadingAnchor.constraint(equalTo: c.leadingAnchor, constant: m),
 
             retireButton.centerYAnchor.constraint(equalTo: stopButton.centerYAnchor),
@@ -1072,6 +1095,7 @@ class PreferencesController: NSObject, NSTextFieldDelegate {
             let seconds = IntervalPreset.all[idx].seconds
             RotationManager.shared.start(folderPath: path, intervalSeconds: seconds,
                                          displayMode: selectedDisplayMode(), playMode: selectedPlayMode())
+            DebugLog.record(action: "apply-folder", image: path)
             syncUI()
         } else {
             RotationManager.shared.stop()
@@ -1084,6 +1108,7 @@ class PreferencesController: NSObject, NSTextFieldDelegate {
                     cfg.folderPath = nil
                     cfg.save()
                     RotationManager.shared.config = cfg
+                    DebugLog.record(action: "apply-image", image: path)
                     DispatchQueue.main.async { [weak self] in
                         self?.statusLabel.stringValue = "Applied."
                         self?.statusLabel.textColor = .tertiaryLabelColor

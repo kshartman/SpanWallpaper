@@ -38,6 +38,7 @@ public struct AppConfig: Codable, Equatable {
     public var autoClearCache: Bool
     public var cacheAccessConfirmed: Bool
     public var monitorFolders: [String: String]?
+    public var debugLog: Bool
 
     public static let defaultInterval = 86400
 
@@ -57,7 +58,8 @@ public struct AppConfig: Codable, Equatable {
         appearanceMode: AppearanceMode = .system,
         autoClearCache: Bool = false,
         cacheAccessConfirmed: Bool = false,
-        monitorFolders: [String: String]? = nil
+        monitorFolders: [String: String]? = nil,
+        debugLog: Bool = false
     ) {
         self.folderPath = folderPath
         self.singleImagePath = singleImagePath
@@ -75,6 +77,7 @@ public struct AppConfig: Codable, Equatable {
         self.autoClearCache = autoClearCache
         self.cacheAccessConfirmed = cacheAccessConfirmed
         self.monitorFolders = monitorFolders
+        self.debugLog = debugLog
     }
 
     public init(from decoder: Decoder) throws {
@@ -95,6 +98,36 @@ public struct AppConfig: Codable, Equatable {
         autoClearCache = try c.decodeIfPresent(Bool.self, forKey: .autoClearCache) ?? false
         cacheAccessConfirmed = try c.decodeIfPresent(Bool.self, forKey: .cacheAccessConfirmed) ?? false
         monitorFolders = try c.decodeIfPresent([String: String].self, forKey: .monitorFolders)
+        debugLog = try c.decodeIfPresent(Bool.self, forKey: .debugLog) ?? false
+    }
+
+    // MARK: - Persistence
+
+    public static func load() -> AppConfig? {
+        let fm = FileManager.default
+        if let data = try? Data(contentsOf: AppPaths.configURL) {
+            return try? JSONDecoder().decode(AppConfig.self, from: data)
+        }
+        let oldURL = AppPaths.supportDir.appendingPathComponent("rotation.json")
+        guard let oldData = try? Data(contentsOf: oldURL),
+              let old = try? JSONDecoder().decode(RotationConfig.self, from: oldData) else {
+            return nil
+        }
+        let migrated = old.toAppConfig()
+        migrated.save()
+        try? fm.removeItem(at: oldURL)
+        return migrated
+    }
+
+    public func save() {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        guard let data = try? encoder.encode(self) else { return }
+        try? data.write(to: AppPaths.configURL, options: .atomic)
+    }
+
+    public static func remove() {
+        try? FileManager.default.removeItem(at: AppPaths.configURL)
     }
 }
 

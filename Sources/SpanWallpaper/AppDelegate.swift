@@ -35,10 +35,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 FileManager.default.fileExists(atPath: path, isDirectory: &isDir)
                 if isDir.boolValue {
                     RotationManager.shared.start(folderPath: path)
+                    DebugLog.record(action: "cli-start-folder", image: path)
                 } else {
                     RotationManager.shared.stop()
                     do {
                         try processImage(at: path, displayMode: displayMode)
+                        DebugLog.record(action: "cli-apply", image: path)
                     } catch {
                         Log.info("ERROR: \(error)")
                     }
@@ -94,6 +96,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 var updated = config
                 updated.lastImagePath = next.path
                 updated.save()
+                DebugLog.record(action: "launchd-rotate (\(config.playMode.rawValue))", image: next.path)
             }
             WallpaperSetter.clearError()
         } catch {
@@ -145,6 +148,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             if !WallpaperSetter.lastSliceFiles.isEmpty {
                 Log.info("Space changed -- apply-only reapply")
                 WallpaperSetter.reapplyLastSlices()
+                DebugLog.record(action: "space-change (cached slices)",
+                                images: WallpaperSetter.lastSliceFiles.values.map(\.path))
             } else {
                 Log.info("Space changed -- full reapply")
                 RotationManager.shared.reapplyCurrent()
@@ -185,6 +190,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         isReapplying = true
         Log.info("Re-applying wallpaper after \(reason)...")
+        if let img = RotationManager.shared.lastAppliedImagePath {
+            DebugLog.record(action: "reapply (\(reason))", image: img)
+        }
         DispatchQueue.global(qos: .userInitiated).async {
             let displayCount = NSScreen.screens.count
             RotationManager.shared.switchFolderIfNeeded(displayCount: displayCount)
@@ -210,10 +218,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             if isDir.boolValue {
                 RotationManager.shared.start(folderPath: path)
                 prefsController?.syncUI()
+                DebugLog.record(action: "open-folder", image: path)
             } else {
                 RotationManager.shared.stop()
                 do {
                     try processImage(at: path, displayMode: displayMode)
+                    DebugLog.record(action: "open-image", image: path)
                 } catch {
                     if window != nil {
                         showError(error.localizedDescription)

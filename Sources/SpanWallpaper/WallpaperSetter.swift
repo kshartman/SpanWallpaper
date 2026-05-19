@@ -2,21 +2,6 @@ import AppKit
 import SpanWallpaperLib
 
 enum WallpaperSetter {
-    static let supportDir: URL = {
-        let fm = FileManager.default
-        let dir: URL
-        if let custom = ProcessInfo.processInfo.environment["SPAN_WALLPAPER_DIR"] {
-            dir = URL(fileURLWithPath: (custom as NSString).expandingTildeInPath, isDirectory: true)
-        } else {
-            let base = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-            dir = base.appendingPathComponent("SpanWallpaper", isDirectory: true)
-        }
-        try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir
-    }()
-
-    static let configURL: URL = supportDir.appendingPathComponent("config.json")
-    static let errorURL: URL = supportDir.appendingPathComponent("last-error.txt")
 
     private static let queue = DispatchQueue(label: "com.shartman.SpanWallpaper.sliceFiles")
     private static var _lastSliceFiles: [CGDirectDisplayID: URL] = [:]
@@ -124,7 +109,7 @@ enum WallpaperSetter {
 
     static func cleanupOldFiles(keeping keep: Set<String>) {
         let fm = FileManager.default
-        guard let items = try? fm.contentsOfDirectory(at: supportDir, includingPropertiesForKeys: nil) else { return }
+        guard let items = try? fm.contentsOfDirectory(at: AppPaths.supportDir, includingPropertiesForKeys: nil) else { return }
         for url in items {
             if SliceFileMatch.shouldClean(filename: url.lastPathComponent, keeping: keep) {
                 try? fm.removeItem(at: url)
@@ -135,20 +120,20 @@ enum WallpaperSetter {
     // MARK: - Error file
 
     static func writeError(_ message: String) {
-        try? message.data(using: .utf8)?.write(to: errorURL)
+        try? message.data(using: .utf8)?.write(to: AppPaths.errorURL)
     }
 
     static func clearError() {
-        try? FileManager.default.removeItem(at: errorURL)
+        try? FileManager.default.removeItem(at: AppPaths.errorURL)
     }
 
     static func readError() -> String? {
-        try? String(contentsOf: errorURL, encoding: .utf8)
+        try? String(contentsOf: AppPaths.errorURL, encoding: .utf8)
     }
 
     // MARK: - Skip marker (prevents RunAtLoad tick after fresh install)
 
-    private static let skipMarkerURL: URL = supportDir.appendingPathComponent(".skip-next-tick")
+    private static let skipMarkerURL: URL = AppPaths.supportDir.appendingPathComponent(".skip-next-tick")
 
     static func writeSkipMarker() {
         try? Data().write(to: skipMarkerURL)
@@ -163,7 +148,7 @@ enum WallpaperSetter {
 
     // MARK: - Cross-process lock
 
-    private static let lockURL: URL = supportDir.appendingPathComponent(".lock")
+    private static let lockURL: URL = AppPaths.supportDir.appendingPathComponent(".lock")
 
     static func withProcessLock<T>(_ body: () throws -> T) throws -> T {
         let fd = open(lockURL.path, O_CREAT | O_RDWR, 0o644)

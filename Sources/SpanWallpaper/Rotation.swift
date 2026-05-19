@@ -29,38 +29,6 @@ func imageFiles(in folderURL: URL, options: ScanOptions = ScanOptions()) -> [URL
     FolderImageCache.shared.imageFiles(in: folderURL, options: options)
 }
 
-// MARK: - Config Persistence
-
-extension AppConfig {
-    static func load() -> AppConfig? {
-        let configURL = WallpaperSetter.configURL
-        if let data = try? Data(contentsOf: configURL) {
-            return try? JSONDecoder().decode(AppConfig.self, from: data)
-        }
-        let oldURL = WallpaperSetter.supportDir.appendingPathComponent("rotation.json")
-        guard let oldData = try? Data(contentsOf: oldURL),
-              let old = try? JSONDecoder().decode(RotationConfig.self, from: oldData) else {
-            return nil
-        }
-        let migrated = old.toAppConfig()
-        migrated.save()
-        try? FileManager.default.removeItem(at: oldURL)
-        Log.info("Migrated rotation.json -> config.json")
-        return migrated
-    }
-
-    func save() {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        guard let data = try? encoder.encode(self) else { return }
-        try? data.write(to: WallpaperSetter.configURL, options: .atomic)
-    }
-
-    static func remove() {
-        try? FileManager.default.removeItem(at: WallpaperSetter.configURL)
-    }
-}
-
 // MARK: - Rotation Manager
 
 class RotationManager {
@@ -165,6 +133,7 @@ class RotationManager {
                 lastAppliedImagePath = nextImage.path
                 self.config?.lastImagePath = nextImage.path
                 self.config?.save()
+                DebugLog.record(action: "next (\(config.playMode.rawValue))", image: nextImage.path)
             }
         } catch {
             Log.info("Rotation error: \(error)")
@@ -188,6 +157,7 @@ class RotationManager {
                 lastAppliedImagePath = prev.path
                 self.config?.lastImagePath = prev.path
                 self.config?.save()
+                DebugLog.record(action: "previous", image: prev.path)
             }
         } catch {
             Log.info("Previous error: \(error)")
@@ -205,6 +175,7 @@ class RotationManager {
                     try processImage(at: path, displayMode: config?.displayMode ?? .span)
                 }
                 Log.info("Re-applied current wallpaper.")
+                DebugLog.record(action: "reapply", image: path)
             } catch {
                 Log.info("Re-apply error: \(error)")
             }
@@ -234,6 +205,7 @@ class RotationManager {
             }
             try fm.moveItem(at: imageURL, to: dest)
             Log.info("Retired: \(imageURL.lastPathComponent) -> retired/\(dest.lastPathComponent)")
+            DebugLog.record(action: "retire", image: imageURL.path)
         } catch {
             Log.info("Retire failed: \(error)")
             return
@@ -258,12 +230,16 @@ class RotationManager {
             lastAppliedImagePath = saved.lastImagePath
             scheduleTimer()
             Log.info("Resumed rotation: \(folderPath)")
+            if let last = saved.lastImagePath {
+                DebugLog.record(action: "resume-rotation", image: last)
+            }
         } else if let singlePath = saved.singleImagePath {
             guard FileManager.default.fileExists(atPath: singlePath) else { return }
             do {
                 try processImage(at: singlePath, displayMode: saved.displayMode)
                 lastAppliedImagePath = singlePath
                 Log.info("Reapplied single image: \(singlePath)")
+                DebugLog.record(action: "resume-single", image: singlePath)
             } catch {
                 Log.info("Reapply error: \(error)")
             }
@@ -282,6 +258,7 @@ class RotationManager {
               FileManager.default.fileExists(atPath: folder) else { return }
 
         Log.info("Display count changed to \(displayCount), switching to: \(folder)")
+        DebugLog.record(action: "display-switch (count=\(displayCount))", image: folder)
         self.config?.folderPath = folder
         self.config?.lastImagePath = nil
         self.config?.save()

@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import SpanWallpaperLib
 
 enum Log {
     static func info(_ message: @autoclosure () -> String) {
@@ -35,6 +36,39 @@ enum WallpaperError: Error, CustomStringConvertible {
         case .noImagesInFolder(let url):
             return "No image files found in \(url.path)."
         }
+    }
+}
+
+enum DebugLog {
+    private static let logURL = AppPaths.supportDir.appendingPathComponent("debug.log")
+
+    private static let dateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        f.locale = Locale(identifier: "en_US_POSIX")
+        return f
+    }()
+
+    static func record(action: String, images: [String]) {
+        guard AppConfig.load()?.debugLog == true else { return }
+        let ts = dateFormatter.string(from: Date())
+        var line = "[\(ts)] \(action)"
+        for path in images {
+            line += "\n  \(path)"
+        }
+        line += "\n"
+        let data = Data(line.utf8)
+        if let fh = try? FileHandle(forWritingTo: logURL) {
+            fh.seekToEndOfFile()
+            fh.write(data)
+            fh.closeFile()
+        } else {
+            try? data.write(to: logURL)
+        }
+    }
+
+    static func record(action: String, image: String) {
+        record(action: action, images: [image])
     }
 }
 

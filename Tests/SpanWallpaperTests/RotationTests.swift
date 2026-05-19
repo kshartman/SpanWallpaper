@@ -92,6 +92,35 @@ final class AppConfigTests: XCTestCase {
         let config = try JSONDecoder().decode(AppConfig.self, from: json)
         XCTAssertNil(config.monitorFolders)
     }
+
+    func testDebugLogDefaultFalse() throws {
+        let json = "{}".data(using: .utf8)!
+        let config = try JSONDecoder().decode(AppConfig.self, from: json)
+        XCTAssertFalse(config.debugLog)
+    }
+
+    func testDebugLogRoundTrip() throws {
+        let config = AppConfig(debugLog: true)
+        let data = try JSONEncoder().encode(config)
+        let decoded = try JSONDecoder().decode(AppConfig.self, from: data)
+        XCTAssertTrue(decoded.debugLog)
+    }
+
+    func testSaveAndLoad() throws {
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("SpanWallpaperTest-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+
+        let configURL = tmp.appendingPathComponent("config.json")
+        let config = AppConfig(folderPath: "/test", debugLog: true)
+        let data = try JSONEncoder().encode(config)
+        try data.write(to: configURL, options: .atomic)
+
+        let loaded = try JSONDecoder().decode(AppConfig.self, from: Data(contentsOf: configURL))
+        XCTAssertEqual(loaded.folderPath, "/test")
+        XCTAssertTrue(loaded.debugLog)
+    }
 }
 
 // MARK: - Legacy RotationConfig (migration source)

@@ -151,7 +151,7 @@ func processImage(at path: String, displayMode: DisplayMode = .span) throws {
                 slice: slice
             )
             let filename = "\(runID)_\(slice.displayID).jpg"
-            let fileURL = WallpaperSetter.supportDir.appendingPathComponent(filename)
+            let fileURL = AppPaths.supportDir.appendingPathComponent(filename)
             try ImagePipeline.writeJPEG(rendered, to: fileURL)
             sliceFiles.append((slice: slice, url: fileURL))
         }
