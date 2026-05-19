@@ -183,9 +183,15 @@ class RotationManager {
     }
 
     func retireCurrent() {
-        guard isActive else { return }
-        guard let currentPath = lastAppliedImagePath ?? config?.lastImagePath else { return }
+        guard isActive, let config = config, let folderPath = config.folderPath else { return }
+        guard let currentPath = lastAppliedImagePath ?? config.lastImagePath else { return }
         let imageURL = URL(fileURLWithPath: currentPath)
+
+        let folder = URL(fileURLWithPath: folderPath)
+        FolderImageCache.shared.invalidate()
+        let images = imageFiles(in: folder, options: scanOptions())
+        let successor = pickNextImage(from: images, lastUsed: currentPath, playMode: config.playMode)
+
         let retiredDir = imageURL.deletingLastPathComponent()
             .appendingPathComponent("retired", isDirectory: true)
 
@@ -213,7 +219,19 @@ class RotationManager {
 
         FolderImageCache.shared.invalidate()
         resetShuffle()
-        applyNext()
+
+        guard let nextImage = successor else { return }
+        do {
+            try WallpaperSetter.withProcessLock {
+                try processImage(at: nextImage.path, displayMode: config.displayMode)
+                lastAppliedImagePath = nextImage.path
+                self.config?.lastImagePath = nextImage.path
+                self.config?.save()
+                DebugLog.record(action: "next (\(config.playMode.rawValue))", image: nextImage.path)
+            }
+        } catch {
+            Log.info("Rotation error after retire: \(error)")
+        }
     }
 
     func resume() {
