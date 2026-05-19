@@ -1,5 +1,18 @@
 # Changelog
 
+## 2.3.0 — 2026-05-19
+
+Debug logging and config architecture cleanup.
+
+### Features
+- **Debug log**: optional timestamped log of every wallpaper transition -- records image paths, trigger action (next, previous, retire, reapply, launchd-rotate, space-change, cli-apply, etc.), toggled via a checkbox in preferences; off by default; writes to `~/Library/Application Support/SpanWallpaper/debug.log`
+
+### Under the hood
+- **Config persistence moved to lib**: `AppConfig.load()`, `save()`, `remove()` are now public methods on `AppConfig` in `SpanWallpaperLib` -- accessible from any target without going through `RotationManager`
+- **`AppPaths` centralized in lib**: new `Sources/SpanWallpaperLib/AppPaths.swift` owns `supportDir`, `configURL`, `errorURL` (previously scattered across `WallpaperSetter`)
+- `DebugLog` reads config from disk on each call (`AppConfig.load()?.debugLog`) -- avoids thread-safety issues with the `RotationManager` singleton
+- 64 unit tests (up from 61)
+
 ## 2.2.0 — 2026-05-16
 
 Per-display folder switching and distributable installer.
