@@ -4,9 +4,13 @@
 #
 # Output: dist/SpanWallpaper-<version>.pkg
 #
-# Usage:  ./build-pkg.sh
+# Usage:  ./build-pkg.sh           # unsigned (dev/test)
+#         ./build-pkg.sh --sign    # signed + notarized (release)
 #
 set -euo pipefail
+
+SIGN=false
+[[ "${1:-}" == "--sign" ]] && SIGN=true
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 APP_NAME="SpanWallpaper"
@@ -235,12 +239,19 @@ done
 # ---------------------------------------------------------------------------
 # 4) Code sign
 # ---------------------------------------------------------------------------
-SIGN_ID=$(security find-identity -v -p codesigning 2>/dev/null | head -1 | sed 's/.*"\(.*\)".*/\1/')
-if [[ -n "$SIGN_ID" ]]; then
-    codesign --force --sign "$SIGN_ID" "$BUNDLE" 2>&1
-    echo "Signed with: $SIGN_ID"
+if $SIGN; then
+    echo "Unlocking keychain (enter password in popup if prompted)..."
+    security unlock-keychain ~/Library/Keychains/login.keychain-db
+
+    APP_SIGN_ID="Developer ID Application: Shane Hartman (5B3W3FNBS5)"
+    codesign --force --options runtime --sign "$APP_SIGN_ID" "$BUNDLE" 2>&1
+    echo "Signed app with: $APP_SIGN_ID"
 else
-    echo "Warning: No signing identity — pkg will be unsigned."
+    SIGN_ID=$(security find-identity -v -p codesigning 2>/dev/null | head -1 | sed 's/.*"\(.*\)".*/\1/')
+    if [[ -n "$SIGN_ID" ]]; then
+        codesign --force --sign "$SIGN_ID" "$BUNDLE" 2>&1
+        echo "Signed with: $SIGN_ID"
+    fi
 fi
 
 # ---------------------------------------------------------------------------
@@ -249,18 +260,43 @@ fi
 mkdir -p "$SCRIPT_DIR/dist"
 PKG_OUT="$SCRIPT_DIR/dist/$APP_NAME-$VERSION.pkg"
 
-# Stage the app in a payload root
 PAYLOAD="$WORK/payload"
 mkdir -p "$PAYLOAD/Applications"
 cp -R "$BUNDLE" "$PAYLOAD/Applications/"
+
+PKG_SIGN_ARGS=()
+if $SIGN; then
+    PKG_SIGN_ARGS=(--sign "Developer ID Installer: Shane Hartman (5B3W3FNBS5)")
+fi
 
 /usr/bin/pkgbuild \
     --root "$PAYLOAD" \
     --identifier "com.shartman.SpanWallpaper" \
     --version "$VERSION" \
     --install-location "/" \
+    "${PKG_SIGN_ARGS[@]}" \
     "$PKG_OUT"
 
 echo ""
 echo "Package built: $PKG_OUT"
 echo "Size: $(du -h "$PKG_OUT" | cut -f1)"
+
+# ---------------------------------------------------------------------------
+# 6) Notarize (--sign only)
+# ---------------------------------------------------------------------------
+if $SIGN; then
+    echo ""
+    echo "Submitting for notarization..."
+    xcrun notarytool submit "$PKG_OUT" \
+        --keychain-profile "notarytool-profile" \
+        --wait 2>&1 && {
+        echo "Stapling notarization ticket..."
+        xcrun stapler staple "$PKG_OUT"
+        echo "Notarization complete."
+    } || {
+        echo ""
+        echo "Notarization failed. If this is your first time, store credentials with:"
+        echo "  xcrun notarytool store-credentials notarytool-profile --apple-id shane@shanehartman.com --team-id 5B3W3FNBS5"
+        echo "Then re-run ./build-pkg.sh --sign"
+    }
+fi
