@@ -12,7 +12,7 @@ final class AboutPanel {
         }
 
         let p = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 280, height: 160),
+            contentRect: NSRect(x: 0, y: 0, width: 280, height: 180),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -43,7 +43,12 @@ final class AboutPanel {
         descLabel.textColor = .secondaryLabelColor
         descLabel.alignment = .center
 
-        let stack = NSStackView(views: [nameLabel, versionLabel, dateLabel, descLabel])
+        let copyrightLabel = NSTextField(labelWithString: "\u{00A9} 2026 Shane Hartman — MIT License")
+        copyrightLabel.font = .systemFont(ofSize: 10)
+        copyrightLabel.textColor = .tertiaryLabelColor
+        copyrightLabel.alignment = .center
+
+        let stack = NSStackView(views: [nameLabel, versionLabel, dateLabel, descLabel, copyrightLabel])
         stack.orientation = .vertical
         stack.spacing = 4
         stack.translatesAutoresizingMaskIntoConstraints = false

@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.4.3 — 2026-05-20
+
+Documentation cleanup and initial public release.
+
+- Slimmed CLAUDE.md to essential design constraints only
+- Fixed drag-and-drop description (no Dock icon since LSUIElement)
+- Removed stale TODOS.md
+- Added .DS_Store and emacs temp files to .gitignore
+- LICENSE bundled in .app and copyright shown in About panel
+- BuildInfo.swift committed with placeholders (build scripts overwrite)
+
 ## 2.4.1 — 2026-05-20
 
 About window, collapsible Debug section (test builds only), and installer improvements.

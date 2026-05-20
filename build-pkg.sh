@@ -50,6 +50,7 @@ BUNDLE="$WORK/$APP_NAME.app"
 mkdir -p "$BUNDLE/Contents/MacOS"
 mkdir -p "$BUNDLE/Contents/Resources"
 cp "$SPM_BIN" "$BUNDLE/Contents/MacOS/$APP_NAME"
+cp "$SCRIPT_DIR/LICENSE" "$BUNDLE/Contents/Resources/LICENSE"
 
 cat > "$BUNDLE/Contents/Info.plist" <<PLIST_EOF
 <?xml version="1.0" encoding="UTF-8"?>

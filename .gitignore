@@ -2,3 +2,7 @@
 .swiftpm/
 .gstack/
 dist/
+.DS_Store
+*~
+\#*\#
+.\#*

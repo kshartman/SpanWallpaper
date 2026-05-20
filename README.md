@@ -26,7 +26,7 @@ Compiles the app, generates an icon, code-signs it, installs to `/Applications/S
 ## Usage
 
 - **Double-click** the app to open the preferences window
-- **Drag and drop** an image onto the Desktop/Dock icon or the preferences window
+- **Drag and drop** an image onto the preferences window
 - **CLI**: `open /Applications/SpanWallpaper.app --args /path/to/image.png`
 
 ### Preferences window
@@ -87,5 +87,4 @@ JPEG, PNG, HEIC, HEIF, TIFF, BMP, and WebP.
 ## Docs
 
 - [Changelog](CHANGELOG.md)
-- [Open issues](TODOS.md)
 - [License (MIT)](LICENSE)
