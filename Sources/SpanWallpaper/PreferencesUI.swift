@@ -127,7 +127,14 @@ class PreferencesController: NSObject, NSTextFieldDelegate {
 
     private let displaysToggle = NSButton(title: "\u{25B6}  Displays", target: nil, action: nil)
     private let displaysContainer = NSView()
-    private let debugCheckbox = NSButton(checkboxWithTitle: "Debug log", target: nil, action: nil)
+    #if DEBUG_UI
+    private let debugToggle = NSButton(title: "\u{25B6}  Debug", target: nil, action: nil)
+    private let debugContainer = NSView()
+    private let debugCheckbox = NSButton(checkboxWithTitle: "Enable debug log", target: nil, action: nil)
+    private let debugViewButton = NSButton(title: "View Log", target: nil, action: nil)
+    private var debugExpanded = false
+    private var debugContainerHeight: NSLayoutConstraint!
+    #endif
     private let display1Label = NSTextField(labelWithString: "1:")
     private let display1Path = NSTextField(labelWithString: "Not set")
     private let display1Button = NSButton(title: "Choose...", target: nil, action: nil)
@@ -173,12 +180,21 @@ class PreferencesController: NSObject, NSTextFieldDelegate {
                           filterToggle, filterContainer,
                           cacheToggle, cacheContainer,
                           displaysToggle, displaysContainer,
-                          debugCheckbox,
                           applyButton, nextButton, backButton, retireButton, stopButton,
                           statusLabel, separator] {
             v.translatesAutoresizingMaskIntoConstraints = false
             content.addSubview(v)
         }
+        #if DEBUG_UI
+        for v: NSView in [debugToggle, debugContainer] {
+            v.translatesAutoresizingMaskIntoConstraints = false
+            content.addSubview(v)
+        }
+        for v: NSView in [debugCheckbox, debugViewButton] {
+            v.translatesAutoresizingMaskIntoConstraints = false
+            debugContainer.addSubview(v)
+        }
+        #endif
 
         for v: NSView in [recursiveCheckbox, excludeLabel, excludeFixedTag, excludePlusLabel, excludeField,
                           minSizeLabel, minWidthField, minWidthSuffix, minSizeX, minHeightField, minHeightSuffix,
@@ -208,7 +224,9 @@ class PreferencesController: NSObject, NSTextFieldDelegate {
         setupFilterSection()
         setupCacheSection()
         setupDisplaysSection()
-        setupDebugRow()
+        #if DEBUG_UI
+        setupDebugSection()
+        #endif
         setupActionRow()
         setupStatusRow()
         layoutConstraints()
@@ -699,21 +717,76 @@ class PreferencesController: NSObject, NSTextFieldDelegate {
     @objc private func display2ClearTapped() { clearDisplayFolder(count: 2) }
     @objc private func display3ClearTapped() { clearDisplayFolder(count: 3) }
 
-    private func setupDebugRow() {
+    #if DEBUG_UI
+    private func setupDebugSection() {
+        debugToggle.isBordered = false
+        debugToggle.setButtonType(.momentaryPushIn)
+        debugToggle.font = NSFont.systemFont(ofSize: 13, weight: .medium)
+        debugToggle.contentTintColor = .secondaryLabelColor
+        debugToggle.alignment = .left
+        debugToggle.target = self
+        debugToggle.action = #selector(debugToggleTapped)
+
+        debugContainer.isHidden = true
+        debugContainerHeight = debugContainer.heightAnchor.constraint(equalToConstant: 0)
+        debugContainerHeight.isActive = true
+
         debugCheckbox.target = self
-        debugCheckbox.action = #selector(debugToggled)
-        debugCheckbox.contentTintColor = .tertiaryLabelColor
-        debugCheckbox.font = NSFont.systemFont(ofSize: 11)
+        debugCheckbox.action = #selector(debugCheckboxChanged)
+        debugCheckbox.contentTintColor = .secondaryLabelColor
         let config = RotationManager.shared.config ?? AppConfig()
         debugCheckbox.state = config.debugLog ? .on : .off
+
+        debugViewButton.bezelStyle = .rounded
+        debugViewButton.controlSize = .small
+        debugViewButton.font = NSFont.systemFont(ofSize: 11)
+        debugViewButton.contentTintColor = .secondaryLabelColor
+        debugViewButton.target = self
+        debugViewButton.action = #selector(viewDebugLog)
     }
 
-    @objc private func debugToggled() {
+    @objc private func debugToggleTapped() {
+        debugExpanded = !debugExpanded
+        let expandedHeight: CGFloat = 60
+        let delta = debugExpanded ? expandedHeight : -expandedHeight
+
+        debugContainer.isHidden = !debugExpanded
+        debugContainerHeight.constant = debugExpanded ? expandedHeight : 0
+
+        var frame = window.frame
+        frame.size.height += delta
+        frame.origin.y -= delta
+        window.setFrame(frame, display: true, animate: true)
+        updateDebugToggleTitle()
+    }
+
+    private func updateDebugToggleTitle() {
+        let arrow = debugExpanded ? "\u{25BC}" : "\u{25B6}"
+        let config = RotationManager.shared.config ?? AppConfig()
+        let suffix = config.debugLog ? " (on)" : ""
+        debugToggle.title = "\(arrow)  Debug\(suffix)"
+    }
+
+    @objc private func debugCheckboxChanged() {
         var config = RotationManager.shared.config ?? AppConfig()
         config.debugLog = debugCheckbox.state == .on
         RotationManager.shared.config = config
         config.save()
+        updateDebugToggleTitle()
     }
+
+    @objc private func viewDebugLog() {
+        let logURL = AppPaths.supportDir.appendingPathComponent("debug.log")
+        if FileManager.default.fileExists(atPath: logURL.path) {
+            NSWorkspace.shared.open(logURL)
+        } else {
+            let alert = NSAlert()
+            alert.messageText = "No Debug Log"
+            alert.informativeText = "Enable the debug log and perform some actions first."
+            alert.runModal()
+        }
+    }
+    #endif
 
     private func setupActionRow() {
         applyButton.target = self
@@ -955,12 +1028,7 @@ class PreferencesController: NSObject, NSTextFieldDelegate {
             display3Clear.trailingAnchor.constraint(equalTo: displaysContainer.trailingAnchor),
             display3Clear.widthAnchor.constraint(equalToConstant: 20),
 
-            // Debug checkbox
-            debugCheckbox.topAnchor.constraint(equalTo: displaysContainer.bottomAnchor, constant: 10),
-            debugCheckbox.trailingAnchor.constraint(equalTo: c.trailingAnchor, constant: -m),
-
-            // Action row
-            stopButton.topAnchor.constraint(equalTo: debugCheckbox.bottomAnchor, constant: 10),
+            // Action row (stopButton.topAnchor set conditionally below)
             stopButton.leadingAnchor.constraint(equalTo: c.leadingAnchor, constant: m),
 
             retireButton.centerYAnchor.constraint(equalTo: stopButton.centerYAnchor),
@@ -982,6 +1050,27 @@ class PreferencesController: NSObject, NSTextFieldDelegate {
             statusLabel.trailingAnchor.constraint(equalTo: c.trailingAnchor, constant: -m),
             statusLabel.bottomAnchor.constraint(lessThanOrEqualTo: c.bottomAnchor, constant: -m),
         ])
+
+        #if DEBUG_UI
+        NSLayoutConstraint.activate([
+            debugToggle.topAnchor.constraint(equalTo: displaysContainer.bottomAnchor, constant: 8),
+            debugToggle.leadingAnchor.constraint(equalTo: c.leadingAnchor, constant: m),
+
+            debugContainer.topAnchor.constraint(equalTo: debugToggle.bottomAnchor, constant: 8),
+            debugContainer.leadingAnchor.constraint(equalTo: c.leadingAnchor, constant: m + 12),
+            debugContainer.trailingAnchor.constraint(equalTo: c.trailingAnchor, constant: -m),
+
+            debugCheckbox.topAnchor.constraint(equalTo: debugContainer.topAnchor, constant: 4),
+            debugCheckbox.leadingAnchor.constraint(equalTo: debugContainer.leadingAnchor),
+
+            debugViewButton.topAnchor.constraint(equalTo: debugCheckbox.bottomAnchor, constant: 8),
+            debugViewButton.leadingAnchor.constraint(equalTo: debugContainer.leadingAnchor),
+
+            stopButton.topAnchor.constraint(equalTo: debugContainer.bottomAnchor, constant: 10),
+        ])
+        #else
+        stopButton.topAnchor.constraint(equalTo: displaysContainer.bottomAnchor, constant: 10).isActive = true
+        #endif
     }
 
     func syncUI() {

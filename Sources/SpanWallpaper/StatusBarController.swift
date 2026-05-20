@@ -67,6 +67,10 @@ class StatusBarController: NSObject, NSMenuDelegate {
 
         menu.addItem(NSMenuItem.separator())
 
+        let aboutItem = NSMenuItem(title: "About SpanWallpaper", action: #selector(showAbout), keyEquivalent: "")
+        aboutItem.target = self
+        menu.addItem(aboutItem)
+
         let quitItem = NSMenuItem(title: "Quit SpanWallpaper", action: #selector(quitApp), keyEquivalent: "q")
         quitItem.target = self
         menu.addItem(quitItem)
@@ -94,6 +98,10 @@ class StatusBarController: NSObject, NSMenuDelegate {
     @objc private func stopRotation() {
         RotationManager.shared.stop()
         NotificationCenter.default.post(name: .spanWallpaperSyncUI, object: nil)
+    }
+
+    @objc private func showAbout() {
+        AboutPanel.shared.show()
     }
 
     @objc private func quitApp() {

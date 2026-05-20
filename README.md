@@ -40,7 +40,7 @@ Double-click the app (or click **Preferences** in the menu bar icon) to open the
 - **Filters** -- collapsible section for recursive scanning, exclude patterns (glob), and min/max size constraints
 - **Cache** -- collapsible section to manage macOS wallpaper cache; auto-clear on rotation or clear manually (requires Full Disk Access)
 - **Displays** -- collapsible section to assign different folders per display count (1/2/3); auto-switches on dock/undock
-- **Debug log** -- opt-in checkbox; logs every wallpaper transition with timestamps and trigger actions to `debug.log`
+- **Debug** (test builds only) -- collapsible section with debug log toggle and "View Log" button
 - **Apply** -- apply the current selection
 - **Next / Back** -- step forward or backward through images (rotation mode)
 - **Retire** -- move current wallpaper to a `retired/` subfolder and advance
@@ -57,6 +57,7 @@ In the collapsible **Displays** section, assign different folders to 1/2/3-displ
 The app runs as a **menu bar icon** (no Dock icon). Click it to access:
 - **Next / Back / Retire** -- navigate or curate images
 - **Preferences** -- open the full preferences window
+- **About SpanWallpaper** -- version and build date
 - **Quit** -- stop the app
 
 ## Storage
